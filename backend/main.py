@@ -6,7 +6,7 @@ from data_loader import (
     SECTIONS_DIR,
     SC_API_SECTIONS,
     VINAYA_SECTIONS,
-    LEGACY_SECTIONS,
+    IA_SECTIONS,
     SECTION_LABELS,
     download_tipitaka,
     load_all_texts,
@@ -23,7 +23,7 @@ def _section_summary():
     all_sections = (
         list(SC_API_SECTIONS)
         + list(VINAYA_SECTIONS)
-        + list(LEGACY_SECTIONS)
+        + list(IA_SECTIONS)
     )
     print(f"\n{'─'*50}")
     print(f"  {'Section':<22}  {'Label':<26}  Segments")
@@ -40,10 +40,7 @@ def _env_check():
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         print(
-            "\n  ℹ  GITHUB_TOKEN not set.  The downloader will still work — Phase 2\n"
-            "     uses at most ~4 GitHub API calls (well within the 60/hr limit).\n"
-            "     A token is only needed if you run this script many times in an hour.\n"
-            "     To set one:  export GITHUB_TOKEN=<your-pat>\n"
+            "\n  ℹ  GITHUB_TOKEN not set.\n"
         )
 
 

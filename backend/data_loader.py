@@ -47,6 +47,7 @@ SUJATO_AUTHOR = "sujato"
 _sc_session = requests.Session()
 _sc_session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; TipitakaLoader/2.0)"})
 
+# GitHub REST API — sends Accept header so responses are JSON; counts against rate-limit
 _gh_session = requests.Session()
 _gh_session.headers.update({
     "User-Agent": "TipitakaLoader/2.0",
@@ -55,6 +56,9 @@ _gh_session.headers.update({
 _gh_token = os.environ.get("GITHUB_TOKEN", "")
 if _gh_token:
     _gh_session.headers["Authorization"] = f"Bearer {_gh_token}"
+
+_raw_session = requests.Session()
+_raw_session.headers.update({"User-Agent": "TipitakaLoader/2.0"})
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Section configuration
@@ -65,7 +69,7 @@ SC_API_SECTIONS: dict[str, int | None] = {
     "dn":   None, "mn":   None, "sn":  None, "an":  None,
     "kp":   None, "dhp":  None, "ud":  None, "iti": None,
     "snp":  None, "thag": None, "thig": None,
-    "ja":   547,  "ap":   None, "cp":  None,
+    "ja":   547,  "cp":  None,
 }
 SC_API_AUTHORS: dict[str, str] = {
     "dn":  "brahmali", "mn":  "bodhi",  "sn":  "bodhi",   "an":  "bodhi",
@@ -88,33 +92,83 @@ BILARA_VINAYA_PATHS: list[str] = [
     "translation/en/sujato/vinaya",
 ]
 
-# ── Phase 3: Abhidhamma + misc via legacy API / sc-data fallback ─────────────
-LEGACY_SECTIONS: dict[str, str] = {
-    "bv":  "Buddhavamsa",
-    "ds":  "Dhammasangani",
-    "dt":  "Dhatu-Katha",
-    "kv":  "Kathavatthu",
-    "mil": "Milindapanha",
-    "pp":  "Patisambhidamagga",
-    "ps":  "Patthana",
-    "pv":  "Petavatthu",
-    "vb":  "Vibhanga",
-    "vv":  "Vimanavatthu",
-    "ya":  "Ya",
+# ── Phase 3: Internet Archive sources ────────────────────────────────────────
+#
+# Each entry: section -> (label, [(identifier, djvu_filename), ...])
+# Filenames are verified from IA metadata — exact names including spaces.
+# Download URL: https://archive.org/download/<id>/<filename>_djvu.txt
+# This returns raw plain text directly (unlike /stream/ which wraps in HTML).
+#
+IA_DL_BASE = "https://archive.org/download"
+
+IA_SECTIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
+    # All identifiers and filenames confirmed from archive.org stream URLs.
+    # Downloads use /download/<id>/<filename>_djvu.txt for raw plain text.
+
+    "ds": ("Dhammasangani", [
+        ("buddhistmanualof00davirich",
+         "buddhistmanualof00davirich_djvu.txt"),
+    ]),
+
+    "vb": ("Vibhanga", [
+        ("Vibhanga", "Vibhanga_a_djvu.txt"),
+        ("Vibhanga", "Vibhanga_b_djvu.txt"),
+    ]),
+
+    "kv": ("Kathavatthu", [
+        ("PointsOfControversyKathavatthu",
+         "Points of Controversy (Kathavatthu)_djvu.txt"),
+    ]),
+
+    "mil": ("Milindapanha", [
+        ("MilindaPanha-TheQuestionsOfKingMilinda-Part-1",
+         "MilindaPanha-TheQuestionsOfKingMilindaByT.W.RhysDavids-Part-I_djvu.txt"),
+        ("MilindaPanha-TheQuestionsOfKingMilinda-Part-2",
+         "MilindaPanha-TheQuestionsOfKingMilindaByT.W.RhysDavids-Part-II_djvu.txt"),
+    ]),
+
+    "dt": ("Dhatu-Katha", [
+        ("DiscourseOnElementsDhatukatha",
+         "Discourse on Elements (Dhatukatha)_djvu.txt"),
+    ]),
+
+    "pp": ("Patisambhidamagga", [
+        ("dhatukatha-pts",
+         "Patisambhidamagga_djvu.txt"),
+    ]),
+
+    "pv": ("Petavatthu", [
+        ("in.ernet.dli.2015.282259",
+         "2015.282259.The-Minor_djvu.txt"),
+    ]),
+    "vv": ("Vimanavatthu", [
+        ("in.ernet.dli.2015.282259",
+         "2015.282259.The-Minor_djvu.txt"),
+    ]),
+
+    "bv": ("Buddhavamsa", [
+        ("in.ernet.dli.2015.283044",
+         "2015.283044.The-Buddhavamsa_djvu.txt"),
+    ]),
+
+    "ps": ("Patthana", [
+        ("myanmartipitakatEnglishtranslations",
+         "06. Abhidhamma Pitaka 7. Conditional Relations (Patthana) Vol.1 (Tr. by U Narada, Mula Patthana Sayadaw, London-1969, PTS (322p) OCRed_djvu.txt"),
+        ("myanmartipitakatEnglishtranslations",
+         "06. Abhidhamma Pitaka 7. Conditional Relations (Patthana) Vol.2 (Tr. by U Narada, Mula Patthana Sayadaw, PTS 1981 (364p)) OCRed_djvu.txt"),
+    ]),
+
+    "ya": ("Ya (Puggalapannatti)", [
+        ("puggalapannatti_202003",
+         "Puggalapannatti_djvu.txt"),
+    ]),
 }
-LEGACY_AUTHORS: dict[str, list[str]] = {
-    "bv":  ["analayo", "horner"],
-    "ds":  ["rhysdavids", "bodhi"],
-    "dt":  ["mtinker"],
-    "kv":  ["aung", "rhysdavids"],
-    "mil": ["rhysdavids", "horner"],
-    "pp":  ["bhikkhunanamoli", "nanamoli"],
-    "ps":  ["mtinker"],
-    "pv":  ["bullitt", "gehman"],
-    "vb":  ["mtinker", "thittila"],
-    "vv":  ["bullitt", "gehman"],
-    "ya":  [],
-}
+
+# Keep for backwards compat
+UNAVAILABLE_SECTIONS: dict[str, str] = {}
+ATI_SECTIONS:     dict[str, tuple[str, list[str]]] = {}
+LEGACY_SECTIONS:  dict[str, str]                   = {}
+LEGACY_AUTHORS_FALLBACK: dict[str, list[str]]      = {}
 
 # ── Human-readable labels ────────────────────────────────────────────────────
 SECTION_LABELS: dict[str, str] = {
@@ -126,7 +180,7 @@ SECTION_LABELS: dict[str, str] = {
     "thig":"Therigatha",       "ja":  "Jataka",
     "ap": "Apadana",           "cp":  "Cariyapitaka",
     **VINAYA_SECTIONS,
-    **LEGACY_SECTIONS,
+    **UNAVAILABLE_SECTIONS,
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -149,6 +203,10 @@ def _get_json(url: str, session: requests.Session | None = None) -> dict | list 
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
+            # Warn when GitHub quota is getting low (API calls only)
+            remaining = resp.headers.get("X-RateLimit-Remaining")
+            if remaining is not None and int(remaining) < 10:
+                tqdm.write(f"  [warn] GitHub API quota low: {remaining} requests remaining")
             time.sleep(REQUEST_DELAY)
             return resp.json()
         except requests.exceptions.Timeout:
@@ -170,12 +228,22 @@ def _get_json(url: str, session: requests.Session | None = None) -> dict | list 
 
 
 def _get_raw(url: str) -> bytes | None:
-    """GET a raw URL (for GitHub file downloads), with retries."""
+    """
+    Download a raw file (raw.githubusercontent.com or similar).
+    Uses a plain session with no GitHub API headers so the request is NOT
+    counted against the 60 req/hr unauthenticated API rate-limit.
+    """
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            resp = _gh_session.get(url, timeout=30)
+            resp = _raw_session.get(url, timeout=30)
             if resp.status_code == 404:
                 return None
+            if resp.status_code == 429:
+                # raw.githubusercontent.com can occasionally throttle
+                wait = int(resp.headers.get("Retry-After", 60))
+                tqdm.write(f"  [raw throttle] sleeping {wait}s …")
+                time.sleep(wait)
+                continue
             resp.raise_for_status()
             time.sleep(REQUEST_DELAY)
             return resp.content
@@ -503,7 +571,7 @@ def merge_sections() -> list[str]:
     all_sections = (
         list(SC_API_SECTIONS)
         + list(VINAYA_SECTIONS)
-        + list(LEGACY_SECTIONS)
+        + list(IA_SECTIONS)
     )
     all_texts: list[str] = []
     for section in all_sections:
@@ -647,56 +715,146 @@ def _phase2_vinaya_github(completed: set[str], stats: dict):
 # Phase 3 — Abhidhamma + misc via SC legacy API + sc-data HTML fallback
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _discover_en_authors(uid: str) -> list[str]:
+    """
+    Ask the suttaplex API which English translations exist for `uid` and return
+    their author_uids in priority order (segmented/bilara first, then legacy).
+    Falls back to an empty list if the API is unreachable.
+    """
+    data = _get_json(f"{SC_SUTTAPLEX_API}/{uid}?lang=en")
+    if not data:
+        return []
+    items = data if isinstance(data, list) else [data]
+    authors: list[str] = []
+    for item in items:
+        for t in (item.get("translations") or []):
+            if (t.get("lang") == "en"
+                    and t.get("author_uid")
+                    and not t.get("is_root")):
+                uid_val = t["author_uid"]
+                if uid_val not in authors:
+                    # Prefer segmented (bilara) translations
+                    if t.get("segmented"):
+                        authors.insert(0, uid_val)
+                    else:
+                        authors.append(uid_val)
+    return authors
+
+
+def _ia_discover_djvu_filename(identifier: str) -> str | None:
+    """
+    Use IA metadata API to find the actual _djvu.txt filename for an item.
+    Falls back when hardcoded filename is wrong (e.g. IA renamed the file).
+    Uses _raw_session with JSON accept header for metadata endpoint only.
+    """
+    import json as _json
+    url  = f"https://archive.org/metadata/{identifier}/files"
+    raw  = _get_raw(url)
+    if not raw:
+        return None
+    try:
+        data = _json.loads(raw)
+    except Exception:
+        return None
+    for f in (data.get("result") or []):
+        name = f.get("name", "")
+        if name.endswith("_djvu.txt"):
+            return name
+    return None
+
+
+def _ia_download_djvu(identifier: str, filename: str) -> str | None:
+    """
+    Download a _djvu.txt from IA /download/ endpoint (returns raw plain text).
+    If the hardcoded filename returns HTML/404, auto-discovers the real name
+    via the IA metadata API and retries once.
+    """
+    from urllib.parse import quote
+
+    def _try(fname: str) -> bytes | None:
+        url = f"{IA_DL_BASE}/{identifier}/{quote(fname, safe='')}"
+        tqdm.write(f"  Fetching: archive.org/download/{identifier}/{fname}")
+        raw = _get_raw(url)
+        if raw and not (raw[:200].lstrip().startswith(b'<!DOCTYPE')
+                        or raw[:200].lstrip().startswith(b'<html')):
+            return raw
+        return None
+
+    raw = _try(filename)
+    if raw is None:
+        tqdm.write(f"  [warn] hardcoded filename failed, querying IA metadata…")
+        real = _ia_discover_djvu_filename(identifier)
+        if real and real != filename:
+            tqdm.write(f"  [info] found: {real}")
+            raw = _try(real)
+    if raw is None:
+        return None
+    return raw.decode("utf-8", errors="replace")
+
+def _clean_djvu_text(text: str) -> list[str]:
+    """
+    Extract readable paragraphs from IA plain OCR text.
+    Filters page numbers, running headers, very short lines, ALL-CAPS titles.
+    """
+    segs = []
+    for block in re.split(r'\n{2,}|\f', text):
+        block = block.strip()
+        if not block:
+            continue
+        if re.fullmatch(r'[\d\s\-\u2013\u2014\.\|]+', block):
+            continue
+        if len(block) < 40:
+            continue
+        if block == block.upper() and len(block) < 120:
+            continue
+        block = re.sub(r'[ \t]+', ' ', block)
+        block = re.sub(r'\n', ' ', block)
+        segs.append(block)
+    return segs
+
+
 def _phase3_legacy_extra(completed: set[str], stats: dict):
     print(f"\n{'═'*60}")
-    print("  PHASE 3 — Abhidhamma + Misc  (legacy API / sc-data fallback)")
+    print("  PHASE 3 — Abhidhamma + Misc  (Internet Archive)")
     print(f"{'═'*60}")
 
-    for section, label in LEGACY_SECTIONS.items():
-        authors      = LEGACY_AUTHORS.get(section, [])
+    for section, (label, identifiers) in IA_SECTIONS.items():
+        checkpoint_key = f"ia:{section}"
+        if checkpoint_key in completed:
+            tqdm.write(f"  ✓  {label} [{section}] already complete")
+            continue
+
         section_segs = load_section(section)
         prev         = stats.get(section, {"ok": 0, "warn": 0, "segments": 0})
         ok, warn     = prev["ok"], prev["warn"]
 
-        print(f"\n── {label} [{section}]")
-        uids = discover_uids(section)
-        if not uids:
-            tqdm.write(f"  [warn] no UIDs discovered")
-            continue
+        print(f"\n── {label} [{section}]  ({len(identifiers)} volume(s))")
+        tqdm.write(f"  Source: archive.org/download/{identifiers[0][0]}/...")
 
-        pending = [u for u in uids if u not in completed]
-        tqdm.write(f"  {len(uids)} UIDs total, {len(pending)} pending")
+        all_segs: list[str] = list(section_segs)
+        all_ok = True
 
-        for uid in tqdm(pending, desc=label[:28], unit="text"):
-            segs: list[str] = []
-
-            # Strategy A: SC legacy HTML API (try each known author)
-            for author in authors:
-                data = _fetch_legacy(uid, author)
-                if data:
-                    segs = _extract_legacy_html(data)
-                    if segs:
-                        break
-                time.sleep(REQUEST_DELAY)
-
-            # Strategy B: sc-data GitHub raw HTML fallback
-            if not segs:
-                segs = _scdata_html_fallback(uid, section)
-
-            if segs:
-                section_segs.extend(segs)
+        for identifier, filename in identifiers:
+            text = _ia_download_djvu(identifier, filename)
+            if text:
+                segs = _clean_djvu_text(text)
+                tqdm.write(f"    → {len(segs)} segments from {identifier}")
+                all_segs.extend(segs)
                 ok += 1
             else:
-                tqdm.write(f"  [warn] no text found: {uid}")
+                tqdm.write(f"  [warn] failed: {identifier}")
                 warn += 1
-
-            completed.add(uid)
-            stats[section] = {"ok": ok, "warn": warn, "segments": len(section_segs)}
-            save_checkpoint(completed, stats)
+                all_ok = False
             time.sleep(REQUEST_DELAY)
 
-        save_section(section, section_segs)
-        tqdm.write(f"  → {len(section_segs)} segments saved to sections/{section}.json")
+        save_section(section, all_segs)
+        stats[section] = {"ok": ok, "warn": warn, "segments": len(all_segs)}
+
+        if all_ok:
+            completed.add(checkpoint_key)
+        save_checkpoint(completed, stats)
+        tqdm.write(f"  → {len(all_segs)} segments saved to sections/{section}.json")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Public API
