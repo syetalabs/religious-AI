@@ -1,3 +1,9 @@
 requests
 beautifulsoup4
 tqdm
+fastapi
+uvicorn
+sentence-transformers
+faiss-cpu
+transformers
+torch
