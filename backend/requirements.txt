@@ -7,3 +7,4 @@ sentence-transformers
 faiss-cpu
 transformers
 torch
+sklearn
