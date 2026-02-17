@@ -146,11 +146,6 @@ IA_SECTIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
          "2015.282259.The-Minor_djvu.txt"),
     ]),
 
-    "bv": ("Buddhavamsa", [
-        ("in.ernet.dli.2015.283044",
-         "2015.283044.The-Buddhavamsa_djvu.txt"),
-    ]),
-
     "ps": ("Patthana", [
         ("myanmartipitakatEnglishtranslations",
          "06. Abhidhamma Pitaka 7. Conditional Relations (Patthana) Vol.1 (Tr. by U Narada, Mula Patthana Sayadaw, London-1969, PTS (322p) OCRed_djvu.txt"),
