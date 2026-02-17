@@ -123,8 +123,8 @@ IA_SECTIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "mil": ("Milindapanha", [
         ("MilindaPanha-TheQuestionsOfKingMilinda-Part-1",
          "MilindaPanha-TheQuestionsOfKingMilindaByT.W.RhysDavids-Part-I_djvu.txt"),
-        ("MilindaPanha-TheQuestionsOfKingMilinda-Part-2",
-         "MilindaPanha-TheQuestionsOfKingMilindaByT.W.RhysDavids-Part-II_djvu.txt"),
+        ("questionsofkingm02davi",
+         "questionsofkingm02davi_djvu.txt"),
     ]),
 
     "dt": ("Dhatu-Katha", [
@@ -157,9 +157,16 @@ IA_SECTIONS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("puggalapannatti_202003",
          "Puggalapannatti_djvu.txt"),
     ]),
+
+    # ja-ia: Jataka full 6-volume Cowell edition from IA
+    # Used as fallback for JA UIDs that return {} HTML from SC API.
+    # The SC API is tried first (per-sutta); this provides the bulk prose text.
+    "ja-ia": ("Jataka (Cowell, IA supplement)", [
+        ("complete-cowell-jataka-six-volumes-in-one",
+         "complete-cowell-jataka-six-volumes-in-one_djvu.txt"),
+    ]),
 }
 
-# Keep for backwards compat
 UNAVAILABLE_SECTIONS: dict[str, str] = {}
 ATI_SECTIONS:     dict[str, tuple[str, list[str]]] = {}
 LEGACY_SECTIONS:  dict[str, str]                   = {}
@@ -174,6 +181,7 @@ SECTION_LABELS: dict[str, str] = {
     "snp":"Sutta Nipata",      "thag":"Theragatha",
     "thig":"Therigatha",       "ja":  "Jataka",
     "ap": "Apadana",           "cp":  "Cariyapitaka",
+    "ja-ia": "Jataka (IA supplement)",
     **VINAYA_SECTIONS,
     **UNAVAILABLE_SECTIONS,
 }
@@ -277,6 +285,20 @@ def _fetch_legacy(uid: str, author: str) -> dict | None:
     return _get_json(f"{SC_LEGACY_API}/{uid}/{author}")
 
 
+def _is_placeholder_segment(text: str) -> bool:
+    """Return True if a segment is just an HTML template with {} placeholders."""
+    stripped = text.strip()
+    # Pure HTML tag lines with placeholders
+    if stripped.startswith("<") and "{}" in stripped:
+        return True
+    # Segments where the majority of content is {} tokens
+    placeholder_count = stripped.count("{}")
+    if placeholder_count == 0:
+        return False
+    word_count = len(stripped.split())
+    return placeholder_count >= max(1, word_count // 2)
+
+
 def _extract_bilara(data: dict) -> list[str]:
     """Extract plain-text segments from a bilara API response."""
     if not isinstance(data, dict):
@@ -290,7 +312,11 @@ def _extract_bilara(data: dict) -> list[str]:
                 break
     if not isinstance(translation, dict):
         return []
-    return [s.strip() for s in translation.values() if isinstance(s, str) and s.strip()]
+    return [
+        s.strip() for s in translation.values()
+        if isinstance(s, str) and s.strip()
+        and not _is_placeholder_segment(s)
+    ]
 
 
 def _extract_legacy_html(data: dict) -> list[str]:
@@ -307,11 +333,15 @@ def _extract_legacy_html(data: dict) -> list[str]:
     for tag in soup.find_all(True):
         if tag.name not in ("p", "li", "blockquote"):
             tag.unwrap()
-    return [
-        el.get_text(" ").strip()
-        for el in soup.find_all(["p", "li", "blockquote"])
-        if len(el.get_text(" ").strip()) > 20
-    ]
+    results = []
+    for el in soup.find_all(["p", "li", "blockquote"]):
+        text = el.get_text(" ").strip()
+        if len(text) <= 20:
+            continue
+        if _is_placeholder_segment(text):
+            continue
+        results.append(text)
+    return results
 
 
 def get_segments_sc(uid: str, legacy_author: str | None = None) -> list[str]:
@@ -344,7 +374,7 @@ def get_segments_sc(uid: str, legacy_author: str | None = None) -> list[str]:
     return []
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# GitHub API helpers  (Phases 2 & 3)
+# GitHub API helpers  (Phase 2)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _gh_tree_paths(repo: str, branch: str, root_path: str) -> list[str]:
@@ -437,7 +467,7 @@ def _parse_bilara_json(raw: bytes) -> list[str]:
         if not isinstance(val, str):
             continue
         text = val.strip()
-        if text and not re.fullmatch(r"[\d\.\-]+", text):
+        if text and not re.fullmatch(r"[\d\.\-]+", text) and not _is_placeholder_segment(text):
             segs.append(text)
     return segs
 
@@ -455,6 +485,7 @@ def _parse_legacy_html_bytes(raw: bytes) -> list[str]:
         el.get_text(" ", strip=True)
         for el in soup.find_all(["p", "li", "blockquote", "dd", "h2", "h3", "h4"])
         if len(el.get_text(" ", strip=True)) > 20
+        and not _is_placeholder_segment(el.get_text(" ", strip=True))
     ]
 
 
@@ -561,16 +592,17 @@ def save_section(section: str, segs: list[str]):
     _safe_replace(tmp, str(p))
 
 
-def merge_sections() -> list[str]:
-    """Combine all section files into tipitaka_raw.json and return the list."""
+def merge_sections() -> list[dict]:
     all_sections = (
         list(SC_API_SECTIONS)
         + list(VINAYA_SECTIONS)
-        + list(IA_SECTIONS)
+        + [s for s in IA_SECTIONS if s != "ja-ia"]  # ja-ia is merged into "ja"
     )
-    all_texts: list[str] = []
+    all_texts: list[dict] = []
     for section in all_sections:
-        all_texts.extend(load_section(section))
+        segs = load_section(section)
+        for seg in segs:
+            all_texts.append({"text": seg, "section": section})
     tmp = str(DATA_PATH) + ".tmp"
     Path(tmp).write_text(
         json.dumps(all_texts, indent=2, ensure_ascii=False),
@@ -614,7 +646,10 @@ def _phase1_sc_api(completed: set[str], stats: dict):
 
         section_segs = load_section(section)
         prev = stats.get(section, {"ok": 0, "warn": 0, "segments": 0})
-        ok, warn = prev["ok"], prev["warn"]
+        ok, warn = prev.get("ok", 0), prev.get("warn", 0)
+
+        # Track how many JA UIDs got no text from SC API (need IA supplement)
+        ja_empty_count = 0
 
         for uid in tqdm(pending, desc=label[:28], unit="sutta"):
             segs = get_segments_sc(uid, author)
@@ -624,6 +659,8 @@ def _phase1_sc_api(completed: set[str], stats: dict):
             else:
                 tqdm.write(f"  [warn] no text: {uid}")
                 warn += 1
+                if section == "ja":
+                    ja_empty_count += 1
             completed.add(uid)
             stats[section] = {"ok": ok, "warn": warn, "segments": len(section_segs)}
             save_checkpoint(completed, stats)
@@ -631,6 +668,88 @@ def _phase1_sc_api(completed: set[str], stats: dict):
 
         save_section(section, section_segs)
         tqdm.write(f"  → {len(section_segs)} segments saved to sections/{section}.json")
+
+        if section == "ja" and ja_empty_count > 0:
+            tqdm.write(f"  [info] {ja_empty_count} JA UIDs returned no text from SC API")
+            tqdm.write(f"  [info] Will supplement with full Cowell IA text in Phase 3")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 1b — Jataka verses JA 80-547 via bilara-data GitHub
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Sujato translated all 547 Jataka verse headers in bilara JSON format.
+# The SC API returns these fine for JA 1-79 but the legacy Cowell prose
+# bleeds through as {} HTML for JA 80+.  Going directly to the GitHub
+# bilara-data repo guarantees clean verse text for every story.
+#
+# Path: translation/en/sujato/sutta/kn/ja/**/*_translation-en-sujato.json
+
+BILARA_JA_PATH = "translation/en/sujato/sutta/kn/ja"
+
+def _phase1b_jataka_github(completed: set[str], stats: dict):
+    print(f"\n{'═'*60}")
+    print("  PHASE 1b — Jataka verses  (bilara-data GitHub, all 547)")
+    print(f"{'═'*60}")
+
+    checkpoint_key = "github:ja-bilara"
+    if checkpoint_key in completed:
+        tqdm.write("  ✓ Jataka bilara GitHub already complete")
+        return
+
+    # Discover all JA bilara translation JSON URLs in one API call
+    tqdm.write(f"  Listing {BILARA_REPO}/{BILARA_JA_PATH} …")
+    urls = list_bilara_translation_files(BILARA_REPO, BILARA_BRANCH, BILARA_JA_PATH)
+    tqdm.write(f"  → {len(urls)} JA translation files found")
+
+    if not urls:
+        tqdm.write("  [warn] No JA files found — check BILARA_JA_PATH or GitHub rate limit")
+        return
+
+    # Load existing ja segments (may already have JA 1-79 from Phase 1)
+    section_segs = load_section("ja")
+    # Track which UIDs we already have to avoid duplicates
+    existing_uids: set[str] = set(
+        stats.get("ja", {}).get("fetched_uids", [])
+    )
+
+    prev = stats.get("ja", {"ok": 0, "warn": 0, "segments": 0})
+    ok   = prev.get("ok", 0)
+    warn = prev.get("warn", 0)
+    new_count = 0
+
+    for url in tqdm(urls, desc="Jataka (GitHub)", unit="file"):
+        # Derive UID from filename: ja1_translation-en-sujato.json → ja1
+        fname = url.split("/")[-1]
+        uid   = fname.split("_translation-")[0]
+
+        # Skip if we already fetched this UID via Phase 1 SC API
+        if uid in existing_uids or uid in completed:
+            continue
+
+        raw = _get_raw(url)
+        if raw:
+            segs = _parse_bilara_json(raw)
+            if segs:
+                section_segs.extend(segs)
+                ok += 1
+                new_count += 1
+            else:
+                tqdm.write(f"  [warn] empty: {uid}")
+                warn += 1
+        else:
+            tqdm.write(f"  [warn] download failed: {uid}")
+            warn += 1
+
+        existing_uids.add(uid)
+        stats["ja"] = {"ok": ok, "warn": warn, "segments": len(section_segs),
+                       "fetched_uids": sorted(existing_uids)}
+        save_checkpoint(completed, stats)
+
+    save_section("ja", section_segs)
+    completed.add(checkpoint_key)
+    save_checkpoint(completed, stats)
+    tqdm.write(f"  → {new_count} new files fetched, {len(section_segs)} total segments in ja")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 2 — Vinaya via bilara-data GitHub tree walk
@@ -677,7 +796,7 @@ def _phase2_vinaya_github(completed: set[str], stats: dict):
         urls         = buckets[prefix]
         section_segs = load_section(prefix)
         prev         = stats.get(prefix, {"ok": 0, "warn": 0, "segments": 0})
-        ok, warn     = prev["ok"], prev["warn"]
+        ok, warn     = prev.get("ok", 0), prev.get("warn", 0)
         pending      = [
             u for u in urls
             if u.split("/")[-1].split("_translation-")[0] not in completed
@@ -707,48 +826,16 @@ def _phase2_vinaya_github(completed: set[str], stats: dict):
         tqdm.write(f"  → {len(section_segs)} segments saved to sections/{prefix}.json")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 3 — Abhidhamma + misc via SC legacy API + sc-data HTML fallback
+# Phase 3 — Internet Archive sources
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _discover_en_authors(uid: str) -> list[str]:
-    """
-    Ask the suttaplex API which English translations exist for `uid` and return
-    their author_uids in priority order (segmented/bilara first, then legacy).
-    Falls back to an empty list if the API is unreachable.
-    """
-    data = _get_json(f"{SC_SUTTAPLEX_API}/{uid}?lang=en")
-    if not data:
-        return []
-    items = data if isinstance(data, list) else [data]
-    authors: list[str] = []
-    for item in items:
-        for t in (item.get("translations") or []):
-            if (t.get("lang") == "en"
-                    and t.get("author_uid")
-                    and not t.get("is_root")):
-                uid_val = t["author_uid"]
-                if uid_val not in authors:
-                    # Prefer segmented (bilara) translations
-                    if t.get("segmented"):
-                        authors.insert(0, uid_val)
-                    else:
-                        authors.append(uid_val)
-    return authors
-
-
 def _ia_discover_djvu_filename(identifier: str) -> str | None:
-    """
-    Use IA metadata API to find the actual _djvu.txt filename for an item.
-    Falls back when hardcoded filename is wrong (e.g. IA renamed the file).
-    Uses _raw_session with JSON accept header for metadata endpoint only.
-    """
-    import json as _json
     url  = f"https://archive.org/metadata/{identifier}/files"
     raw  = _get_raw(url)
     if not raw:
         return None
     try:
-        data = _json.loads(raw)
+        data = json.loads(raw)
     except Exception:
         return None
     for f in (data.get("result") or []):
@@ -782,6 +869,16 @@ def _ia_download_djvu(identifier: str, filename: str) -> str | None:
         if real and real != filename:
             tqdm.write(f"  [info] found: {real}")
             raw = _try(real)
+        elif real is None:
+            # Try the uoft mirror as fallback for Milinda Part 2
+            if "questionsofkingm02davi" in identifier:
+                tqdm.write(f"  [info] trying uoft mirror…")
+                alt_id = "questionsofkingm02daviuoft"
+                real2 = _ia_discover_djvu_filename(alt_id)
+                if real2:
+                    url2 = f"{IA_DL_BASE}/{alt_id}/{quote(real2, safe='')}"
+                    tqdm.write(f"  Fetching (uoft mirror): {url2}")
+                    raw = _get_raw(url2)
     if raw is None:
         return None
     return raw.decode("utf-8", errors="replace")
@@ -819,12 +916,19 @@ def _phase3_legacy_extra(completed: set[str], stats: dict):
             tqdm.write(f"  ✓  {label} [{section}] already complete")
             continue
 
-        section_segs = load_section(section)
-        prev         = stats.get(section, {"ok": 0, "warn": 0, "segments": 0})
-        ok, warn     = prev["ok"], prev["warn"]
+        # ja-ia is a supplement: its text belongs in the "ja" section,
+        # not in a separate file. This merges Cowell IA text directly into
+        # sections/ja.json so all Jataka content is in one place.
+        save_section_key = "ja" if section == "ja-ia" else section
+
+        section_segs = load_section(save_section_key)
+        prev         = stats.get(save_section_key, {"ok": 0, "warn": 0, "segments": 0})
+        ok, warn     = prev.get("ok", 0), prev.get("warn", 0)
 
         print(f"\n── {label} [{section}]  ({len(identifiers)} volume(s))")
         tqdm.write(f"  Source: archive.org/download/{identifiers[0][0]}/...")
+        if section == "ja-ia":
+            tqdm.write(f"  [info] Cowell IA text will be merged into sections/ja.json")
 
         all_segs: list[str] = list(section_segs)
         all_ok = True
@@ -842,28 +946,23 @@ def _phase3_legacy_extra(completed: set[str], stats: dict):
                 all_ok = False
             time.sleep(REQUEST_DELAY)
 
-        save_section(section, all_segs)
-        stats[section] = {"ok": ok, "warn": warn, "segments": len(all_segs)}
+        save_section(save_section_key, all_segs)
+        stats[save_section_key] = {"ok": ok, "warn": warn, "segments": len(all_segs)}
 
         if all_ok:
             completed.add(checkpoint_key)
         save_checkpoint(completed, stats)
         tqdm.write(f"  → {len(all_segs)} segments saved to sections/{section}.json")
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Public API
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def download_tipitaka() -> list[str]:
-    """
-    Download the complete Tipitaka (all three phases) and return the merged
-    list of text segments.  Safe to re-run — already-completed UIDs are
-    skipped via checkpoint.
-    """
+def download_tipitaka() -> list[dict]:
     completed, stats = load_checkpoint()
 
     _phase1_sc_api(completed, stats)
+    _phase1b_jataka_github(completed, stats)   # fills JA 80-547 from bilara-data
     _phase2_vinaya_github(completed, stats)
     _phase3_legacy_extra(completed, stats)
 
