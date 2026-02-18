@@ -1,56 +1,46 @@
 import json
-import numpy as np
-import faiss
+import re
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
 
 # ────────────────────────────────────────────────────────────────
 # Paths
 # ────────────────────────────────────────────────────────────────
 
-BASE_DIR    = Path(__file__).resolve().parent
-DATA_DIR    = BASE_DIR.parent / "backend" / "data"
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR.parent / "backend" / "data"
 
 CHUNKS_PATH = DATA_DIR / "chunks.json"
-FAISS_PATH  = DATA_DIR / "faiss_index.bin"
 
 # ────────────────────────────────────────────────────────────────
-# Settings
-# ────────────────────────────────────────────────────────────────
-
-TOP_K                = 5
-SIMILARITY_THRESHOLD = 0.45
-MODEL_NAME           = "all-MiniLM-L6-v2"
-
-# ────────────────────────────────────────────────────────────────
-# Load assets at module import (cached for all queries)
+# Load chunks once at import (cached)
 # ────────────────────────────────────────────────────────────────
 
 print("Loading chunks...")
 with open(CHUNKS_PATH, "r", encoding="utf-8") as f:
     chunks = json.load(f)
+
 print(f"  {len(chunks):,} chunks loaded")
-
-print("Loading FAISS index...")
-index = faiss.read_index(str(FAISS_PATH))
-print(f"  {index.ntotal:,} vectors in index")
-
-print("Loading embedding model...")
-model = SentenceTransformer(MODEL_NAME)
-print("  Ready")
+print("  Keyword search mode enabled")
 
 # ────────────────────────────────────────────────────────────────
-# Build per-religion chunk ID lists for fast filtered search
+# Settings
 # ────────────────────────────────────────────────────────────────
-# Pre-computing these at load time means search() never has to
-# iterate all chunks — it only scores the relevant religion's IDs.
 
-_religion_ids: dict[str, list[int]] = {}
-for i, chunk in enumerate(chunks):
-    rel = chunk.get("religion", "unknown")
-    _religion_ids.setdefault(rel, []).append(i)
+TOP_K = 100  # return many matches
+_STOPWORDS = {
+    "what", "is", "the", "a", "an", "of", "and",
+    "to", "in", "on", "for", "with", "that",
+    "does", "do", "are", "was", "were", "be",
+    "this", "these", "those", "it", "as",
+}
 
-print(f"  Religions indexed: {list(_religion_ids.keys())}")
+# ────────────────────────────────────────────────────────────────
+# Keyword extraction
+# ────────────────────────────────────────────────────────────────
+
+def _extract_keywords(query: str) -> list[str]:
+    words = re.findall(r"\b[a-zA-Z]+\b", query.lower())
+    return [w for w in words if w not in _STOPWORDS and len(w) > 2]
 
 # ────────────────────────────────────────────────────────────────
 # Search
@@ -60,45 +50,41 @@ def search(
     query: str,
     religion: str = "Buddhism",
     top_k: int = TOP_K,
-    threshold: float = SIMILARITY_THRESHOLD,
     language: str = "en",
 ) -> list[dict]:
     """
-    Retrieve the top-k most relevant chunks for a query.
-
-    Filtering order (matches development research spec):
-      1. Religion namespace  — prevents cross-religion contamination
-      2. Language            — returns only chunks in the requested language
-      3. Similarity threshold — confidence gate (section 6 of the research doc)
-
-    Returns a list of dicts with keys:
-      text, book, pitaka, source, religion, language, score
+    Keyword-based retrieval.
+    Returns ALL chunks containing the keywords from the question.
     """
 
-    # 1. Embed and L2-normalise the query (must match how index was built)
-    query_vec = model.encode([query], convert_to_numpy=True)
-    faiss.normalize_L2(query_vec)
+    keywords = _extract_keywords(query)
 
-    # 2. FAISS search — retrieve more than top_k so we have room to filter
-    fetch_k   = min(top_k * 10, index.ntotal)
-    scores, indices = index.search(query_vec, fetch_k)
-    scores    = scores[0]
-    indices   = indices[0]
-
-    # 3. Filter by religion + language + threshold
-    allowed_ids = set(_religion_ids.get(religion, []))
+    if not keywords:
+        return []
 
     results = []
-    for score, idx in zip(scores, indices):
-        if idx == -1:                           # FAISS padding
+
+    for chunk in chunks:
+
+        # 1️⃣ Religion filter
+        if chunk.get("religion") != religion:
             continue
-        if idx not in allowed_ids:              # wrong religion
+
+        # 2️⃣ Language filter
+        if chunk.get("language", "en") != language:
             continue
-        chunk = chunks[idx]
-        if chunk.get("language", "en") != language:  # wrong language
+
+        text_lower = chunk["text"].lower()
+
+        # 3️⃣ Keyword match count
+        match_count = sum(1 for k in keywords if k in text_lower)
+
+        if match_count == 0:
             continue
-        if float(score) < threshold:            # below confidence gate
-            continue
+
+        # Simple relevance score
+        score = match_count / len(keywords)
+
         results.append({
             "text":     chunk["text"],
             "book":     chunk["book"],
@@ -108,17 +94,18 @@ def search(
             "language": chunk.get("language", "en"),
             "score":    float(score),
         })
-        if len(results) >= top_k:
-            break
 
-    return results
+    # Sort by keyword density
+    results.sort(key=lambda r: r["score"], reverse=True)
+
+    return results[:top_k]
 
 # ────────────────────────────────────────────────────────────────
-# CLI runner
+# CLI test
 # ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("\nRetrieval test  (type 'quit' to exit)")
+    print("\nKeyword Retrieval Test  (type 'quit' to exit)")
     print("=" * 50)
 
     while True:
@@ -136,7 +123,7 @@ if __name__ == "__main__":
         res = search(q)
 
         if not res:
-            print("No results above threshold.")
+            print("No matching chunks found.")
             continue
 
         for r in res:
