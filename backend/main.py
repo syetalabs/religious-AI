@@ -1,47 +1,86 @@
 import os
 import sys
-
-from data_loader import (
-    DATA_PATH,
-    SECTIONS_DIR,
-    SC_API_SECTIONS,
-    VINAYA_SECTIONS,
-    IA_SECTIONS,
-    SECTION_LABELS,
-    download_tipitaka,
-    load_all_texts,
-    load_section,
-)
-
+import subprocess
+from pathlib import Path
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Helpers
+# Paths
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _section_summary():
-    """Print a table showing how many segments were saved per section."""
-    all_sections = (
-        list(SC_API_SECTIONS)
-        + list(VINAYA_SECTIONS)
-        + list(IA_SECTIONS)
-    )
-    print(f"\n{'─'*50}")
-    print(f"  {'Section':<22}  {'Label':<26}  Segments")
-    print(f"{'─'*50}")
-    for section in all_sections:
-        segs  = load_section(section)
-        label = SECTION_LABELS.get(section, section.upper())
-        mark  = "✓" if segs else "✗"
-        print(f"  {mark} {section:<20}  {label:<26}  {len(segs):>7,}")
-    print(f"{'─'*50}")
+BASE_DIR        = Path(__file__).parent
+DATA_DIR        = BASE_DIR / "data"
+CORPUS_PATH     = DATA_DIR / "tipitaka_raw.json"
+CHUNKS_PATH     = DATA_DIR / "chunks.json"
+FAISS_PATH      = DATA_DIR / "faiss_index.bin"
+EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Step helpers
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _env_check():
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         print(
             "\n  ℹ  GITHUB_TOKEN not set.\n"
+            "     File downloads use raw.githubusercontent.com (unmetered).\n"
+            "     Set GITHUB_TOKEN only if you run this script many times per hour.\n"
         )
+
+    groq_key = os.environ.get("GROQ_API_KEY", "")
+    if not groq_key:
+        # Try loading from .env manually as a fallback hint
+        env_file = BASE_DIR / ".env"
+        if env_file.exists():
+            print("  ℹ  .env file found — GROQ_API_KEY will be loaded from it.\n")
+        else:
+            print(
+                "\n  ⚠  GROQ_API_KEY is not set and no .env file found.\n"
+                "     Create a .env file in this folder with:\n"
+                "       GROQ_API_KEY=your_key_here\n"
+                "     Get your free key at https://console.groq.com\n"
+            )
+            sys.exit(1)
+
+
+def _step_download():
+    """Download corpus if not already present."""
+    if CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 1000:
+        print(f"  ✓ Corpus already downloaded → {CORPUS_PATH}")
+        return
+
+    print("\n━━━  STEP 1: Downloading Tipitaka Corpus  ━━━\n")
+    from data_loader import download_tipitaka
+    download_tipitaka()
+    print(f"  ✓ Corpus saved → {CORPUS_PATH}")
+
+
+def _step_chunk_and_embed():
+    """Build chunks + FAISS index if not already present."""
+    if CHUNKS_PATH.exists() and FAISS_PATH.exists():
+        import json
+        chunk_count = len(json.loads(CHUNKS_PATH.read_text(encoding="utf-8")))
+        print(f"  ✓ Chunks already built ({chunk_count:,} chunks) → {CHUNKS_PATH}")
+        print(f"  ✓ FAISS index already built → {FAISS_PATH}")
+        return
+
+    print("\n━━━  STEP 2: Chunking & Embedding  ━━━\n")
+    result = subprocess.run(
+        [sys.executable, str(BASE_DIR / "chunk_and_embed.py")],
+        check=True
+    )
+    print("  ✓ Chunks and FAISS index built successfully.")
+
+
+def _print_banner():
+    print("\n" + "═" * 55)
+    print("   🪷  Buddhist AI Chatbot  🪷")
+    print("   Powered by: Groq  (llama-3.1-8b-instant)")
+    print("   Knowledge:  Pali Canon (Sutta, Vinaya, Abhidhamma)")
+    print("═" * 55)
+    print("   Type your question and press Enter.")
+    print("   Type 'quit' or 'exit' to end the session.")
+    print("═" * 55 + "\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -51,37 +90,57 @@ def _env_check():
 def main():
     _env_check()
 
-    # ── Step 1: Download / resume ────────────────────────────────────────────
-    print("Starting full Tipitaka download …")
-    print("(Already-completed sections will be skipped via checkpoint)\n")
+    # ── Step 1: Download corpus ───────────────────────────────────────────────
+    _step_download()
 
-    all_texts = download_tipitaka()
+    # ── Step 2: Chunk + embed ─────────────────────────────────────────────────
+    _step_chunk_and_embed()
 
-    # ── Step 2: Per-section summary ──────────────────────────────────────────
-    _section_summary()
+    # ── Step 3: Launch chatbot ────────────────────────────────────────────────
+    print("\n━━━  STEP 3: Starting Chatbot  ━━━")
 
-    # ── Step 3: Load merged corpus into memory ───────────────────────────────
-    print(f"\n  Loading merged corpus from {DATA_PATH} …")
-    corpus = load_all_texts()
-    print(f"  Total segments in memory: {len(corpus):,}")
+    from rag_answer import answer_question, GROQ_MODEL
 
-    # ── Step 4: Quick sanity checks ──────────────────────────────────────────
-    if not corpus:
-        print("\n  [ERROR] Corpus is empty — check warnings above.", file=sys.stderr)
-        sys.exit(1)
+    _print_banner()
 
-    non_empty = [s for s in corpus if s.strip()]
-    avg_len   = sum(len(s) for s in non_empty) / max(len(non_empty), 1)
-    print(f"  Non-empty segments:       {len(non_empty):,}")
-    print(f"  Average segment length:   {avg_len:.0f} characters")
-    print(f"\n  Sample segments (first 3):")
-    for i, seg in enumerate(non_empty[:3], 1):
-        preview = seg[:120].replace("\n", " ")
-        print(f"    [{i}] {preview}{'…' if len(seg) > 120 else ''}")
+    while True:
+        try:
+            question = input("Ask: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n\nGoodbye. May you be well. 🙏")
+            break
 
-    print("\n  ✓ Pipeline complete.  corpus variable is ready for use.\n")
-    return corpus
+        if not question:
+            continue
+
+        if question.lower() in ("quit", "exit", "q"):
+            print("\nGoodbye. May you be well. 🙏")
+            break
+
+        print("\n  Searching scriptures...\n")
+
+        result = answer_question(question)
+
+        print("─" * 55)
+        print(result["answer"])
+        print("─" * 55)
+
+        if result["sources"]:
+            print("\n📖 Sources:")
+            for book, score in zip(result["sources"], result["scores"]):
+                print(f"   • {book}  (relevance: {score:.3f})")
+
+        if result.get("flagged"):
+            print(f"\n⚠  Input flagged: {', '.join(result['warnings'])}")
+
+        if result.get("low_confidence"):
+            print("\n⚠  Low confidence — no strong scriptural match found.")
+
+        if result.get("warnings") and not result.get("flagged"):
+            print(f"\n[Warnings: {', '.join(result['warnings'])}]")
+
+        print()
 
 
 if __name__ == "__main__":
-    corpus = main()
+    main()
