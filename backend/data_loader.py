@@ -657,7 +657,6 @@ def _phase1_sc_api(completed: set[str], stats: dict):
                 section_segs.extend(segs)
                 ok += 1
             else:
-                tqdm.write(f"  [warn] no text: {uid}")
                 warn += 1
                 if section == "ja":
                     ja_empty_count += 1

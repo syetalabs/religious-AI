@@ -8,8 +8,8 @@ from sentence_transformers import SentenceTransformer
 # Paths
 # ────────────────────────────────────────────────────────────────
 
-BASE_DIR    = Path(__file__).resolve().parent
-DATA_DIR    = BASE_DIR.parent / "backend" / "data"
+BASE_DIR        = Path(__file__).parent
+DATA_DIR        = BASE_DIR / "data"
 
 CHUNKS_PATH = DATA_DIR / "chunks.json"
 FAISS_PATH  = DATA_DIR / "faiss_index.bin"
