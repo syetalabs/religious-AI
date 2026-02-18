@@ -7,8 +7,6 @@ from retrieve import search
 
 # ────────────────────────────────────────────────────────────────
 # Groq API settings
-# Get your free key at: https://console.groq.com
-# Add it to your .env file as: GROQ_API_KEY=your_key_here
 # ────────────────────────────────────────────────────────────────
 
 load_dotenv()  # loads variables from .env file automatically
@@ -29,17 +27,20 @@ if not GROQ_API_KEY:
 # Persona prompt
 # ────────────────────────────────────────────────────────────────
 
-BUDDHIST_PERSONA = """You are a knowledgeable and compassionate Buddhist guide.
+BUDDHIST_PERSONA = """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
 Rules you must follow without exception:
 - Answer ONLY using the scripture context provided. Do not use your own knowledge.
 - If the context does not contain enough information, say exactly:
   "I do not have enough reliable scriptural context to answer this accurately."
+- Use simple, clear, everyday language. Avoid Pali technical terms unless you explain them.
+- Begin with the most human, relatable aspect of the teaching before going deeper.
+- Keep answers concise — 3 to 5 sentences unless the question requires more.
 - Do not provide personal opinions or moral judgments.
 - Do not compare Buddhism with other religions.
 - Do not mix teachings from other traditions.
-- Maintain a calm, respectful, and non-judgmental tone at all times.
-- When referencing scripture, mention the source book from the context."""
+- Maintain a calm, warm, and welcoming tone at all times.
+- When referencing scripture, mention the source book naturally (e.g. "As taught in the Digha Nikaya...")."""
 
 # ────────────────────────────────────────────────────────────────
 # Moderation Layer 1 — Input (Pre-processing)
@@ -180,6 +181,45 @@ def _call_groq(system_prompt: str, user_message: str) -> str:
         return "[ERROR] Cannot connect to Groq. Check your internet connection."
     except Exception as e:
         return f"[ERROR] Groq call failed: {e}"
+    
+# ────────────────────────────────────────────────────────────────
+# Retrieval Post-Processing
+# ────────────────────────────────────────────────────────────────
+def _refine_results(results: list[dict]) -> list[dict]:
+    seen_books = set()
+    seen_text_hashes = set()
+    refined = []
+
+    # 1️⃣ Doctrinal prioritization
+    # Sutta Pitaka first, then others
+    results_sorted = sorted(
+        results,
+        key=lambda r: (
+            0 if r.get("pitaka", "").lower() == "sutta pitaka" else 1,
+            -r["score"]
+        )
+    )
+
+    for r in results_sorted:
+        text_hash = hash(r["text"][:200])  # avoid full long hashing
+
+        # 2️⃣ Remove duplicate books
+        if r["book"] in seen_books:
+            continue
+
+        # 3️⃣ Remove near-duplicate chunks
+        if text_hash in seen_text_hashes:
+            continue
+
+        seen_books.add(r["book"])
+        seen_text_hashes.add(text_hash)
+        refined.append(r)
+
+        # Limit to max 4 strong sources
+        if len(refined) >= 4:
+            break
+
+    return refined
 
 # ────────────────────────────────────────────────────────────────
 # Core answer function
@@ -196,7 +236,8 @@ def answer_question(
     if not is_safe:
         return {
             "answer":         _FALLBACK_MESSAGES.get(reason, "This question cannot be answered."),
-            "sources":        [], "scores":        [],
+            "sources":        [], 
+            "scores":        [],
             "flagged":        True,
             "low_confidence": False,
             "warnings":       [reason],
@@ -212,6 +253,8 @@ def answer_question(
             "low_confidence": True,
             "warnings":       [],
         }
+    
+    results = _refine_results(results)
 
     # Context injection
     context = "\n\n---\n\n".join(
@@ -223,8 +266,12 @@ def answer_question(
 
 Question: {question}
 
-Answer strictly and only using the scripture context above.
-Cite the source book when referencing specific teachings.
+Instructions:
+- Start with a simple, human explanation a beginner can understand.
+- Then support it with what the scripture says, citing the source naturally.
+- If the teaching has a practical dimension, briefly mention it.
+- Do not use bullet points or lists. Write in flowing, warm prose.
+
 Answer:"""
 
     # LLM generation
