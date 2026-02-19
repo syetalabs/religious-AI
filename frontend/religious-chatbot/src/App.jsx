@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const LANGUAGES = [
-  "English","Sinhala", "Tamil"
-];
+const LANGUAGES = ["English", "Sinhala", "Tamil"];
 
 const RECENT_CHATS = [
   { id: 1, title: "Understanding Karma", time: "2h ago" },
@@ -11,6 +9,8 @@ const RECENT_CHATS = [
   { id: 4, title: "Meditation techniques", time: "3 days ago" },
 ];
 
+
+// ─── SVG Watermark ────────────────────────────────────────
 const DharmaWheelSVG = () => (
   <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", height: "100%" }}>
     <circle cx="100" cy="100" r="90" stroke="#c9a96e" strokeWidth="6" fill="none" opacity="0.35" />
@@ -37,7 +37,8 @@ const DharmaWheelSVG = () => (
   </svg>
 );
 
-const UserAvatar = ({ name = "Alexander", size = 32 }) => (
+// ─── Avatars ──────────────────────────────────────────────
+const UserAvatar = ({ name = "User", size = 32 }) => (
   <div style={{
     width: size, height: size, borderRadius: "50%",
     background: "linear-gradient(135deg, #c9a96e, #8b6914)",
@@ -45,7 +46,7 @@ const UserAvatar = ({ name = "Alexander", size = 32 }) => (
     fontSize: size * 0.38, color: "#fff", fontWeight: "700",
     fontFamily: "'Cinzel', serif", flexShrink: 0
   }}>
-    {name[0]}
+    {name[0].toUpperCase()}
   </div>
 );
 
@@ -62,15 +63,14 @@ const BotAvatar = ({ size = 32 }) => (
 
 export default function ReligiousChatbot() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [messages, setMessages] = useState([
-    { id: 1, role: "user", text: "I feel angry all the time. How can I control it?" },
-    { id: 2, role: "bot", text: "Anger is a natural feeling, but holding onto it brings suffering. In the Tripitaka, the Buddha teaches that anger is overcome through mindfulness and loving-kindness." },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [language, setLanguage] = useState("English");
   const [showLangDropdown, setShowLangDropdown] = useState(false);
-  const [activeChat, setActiveChat] = useState(1);
+  const [activeChat, setActiveChat] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState(null);
+  const [isConnected, setIsConnected] = useState(null); // null=checking, true=ok, false=down
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -150,8 +150,9 @@ export default function ReligiousChatbot() {
         overflow: "hidden",
         position: "relative", zIndex: 10
       }}>
-        <div style={{ padding: "20px 14px 14px", opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s" }}>
-          {/* Logo / Title */}
+        <div style={{ padding: "20px 14px 80px", opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s", height: "100%" }}>
+
+          {/* Logo */}
           <div style={{ textAlign: "center", marginBottom: 20 }}>
             <div style={{ fontSize: 28, marginBottom: 4 }}>☸️</div>
           </div>
@@ -188,18 +189,16 @@ export default function ReligiousChatbot() {
             ))}
           </div>
 
-          {/* Spacer */}
-          <div style={{ flex: 1 }} />
-
-          {/* User Profile */}
+        {/* User Profile pinned to bottom */}
           <div style={{
             position: "absolute", bottom: 0, left: 0, right: 0,
             padding: "12px 14px",
             borderTop: `1px solid ${palette.sidebarBorder}`,
             background: palette.sidebar,
-            display: "flex", alignItems: "center", gap: 10
+          display: "flex", alignItems: "center", gap: 10,
+          opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s"
           }}>
-            <UserAvatar name="Alexander" size={34} />
+          <UserAvatar name="User" size={34} />
             <div style={{ flex: 1, overflow: "hidden" }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: palette.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Alexander</div>
               <div style={{ fontSize: 10, color: palette.textMuted }}>Seeker</div>
@@ -209,7 +208,7 @@ export default function ReligiousChatbot() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* ── Main Content ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
 
         {/* Header */}
@@ -230,7 +229,6 @@ export default function ReligiousChatbot() {
             {sidebarOpen ? "◁" : "▷"}
           </button>
 
-          {/* Bot avatar + title */}
           <BotAvatar size={34} />
 
           <div style={{ flex: 1 }} />
@@ -282,11 +280,8 @@ export default function ReligiousChatbot() {
         </div>
 
         {/* Chat Area */}
-        <div style={{
-          flex: 1, overflowY: "auto", padding: "28px 10%",
-          position: "relative"
-        }}>
-          {/* Watermark wheel */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "28px 10%", position: "relative" }}>
+          {/* Watermark */}
           <div style={{
             position: "absolute", top: "50%", left: "50%",
             transform: "translate(-50%, -50%)",
@@ -304,9 +299,9 @@ export default function ReligiousChatbot() {
                   flexDirection: msg.role === "user" ? "row-reverse" : "row",
                   alignItems: "flex-end", gap: 10
                 }}>
-                {msg.role === "bot" ? <BotAvatar size={30} /> : <UserAvatar name="Alexander" size={30} />}
-                <div style={{
-                  maxWidth: "55%",
+                {msg.role === "bot" ? <BotAvatar size={30} /> : <UserAvatar name="U" size={30} />}
+                <div style={{ maxWidth: "58%", display: "flex", flexDirection: "column" }}>
+                  <div style={{
                   background: msg.role === "user"
                     ? `linear-gradient(135deg, ${palette.accent}, ${palette.accentDark})`
                     : palette.botBubble,
@@ -314,12 +309,15 @@ export default function ReligiousChatbot() {
                   borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
                   padding: "12px 16px",
                   fontSize: 13.5, lineHeight: 1.65,
-                  boxShadow: msg.role === "user"
-                    ? "0 4px 16px #c9a96e44"
-                    : "0 2px 12px #0000000d",
+                    boxShadow: msg.role === "user" ? "0 4px 16px #c9a96e44" : "0 2px 12px #0000000d",
                   border: msg.role === "bot" ? `1px solid ${palette.sidebarBorder}` : "none"
                 }}>
                   {msg.text}
+                  </div>
+                  {/* Sources */}
+                  {msg.role === "bot" && <SourcePills sources={msg.sources} palette={palette} />}
+                  {/* Confidence warning */}
+                  {msg.role === "bot" && msg.warning && <ConfidenceWarning palette={palette} />}
                 </div>
               </div>
             ))}
@@ -365,25 +363,16 @@ export default function ReligiousChatbot() {
                 flex: 1, background: "transparent", border: "none",
                 fontFamily: "'Lora', serif", fontSize: 13.5, color: palette.text,
                 resize: "none", lineHeight: 1.5,
-                maxHeight: 100, overflowY: "auto"
+                maxHeight: 100, overflowY: "auto",
+                opacity: isTyping ? 0.6 : 1
               }}
             />
-            {/* Attach */}
-            <button className="icon-btn" style={{
-              width: 34, height: 34, border: "none", background: "transparent",
-              cursor: "pointer", color: palette.textMuted, fontSize: 18,
-              borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "background 0.15s"
-            }}>📎</button>
-            {/* Voice */}
-            <button className="icon-btn" style={{
-              width: 34, height: 34, border: "none", background: "transparent",
-              cursor: "pointer", color: palette.textMuted, fontSize: 16,
-              borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "background 0.15s"
-            }}>🎙</button>
+            
             {/* Send */}
-            <button onClick={handleSend}
+            <button
+              className="send-btn"
+              onClick={handleSend}
+              disabled={!input.trim() || isTyping}
               style={{
                 width: 36, height: 36,
                 background: `linear-gradient(135deg, ${palette.accent}, ${palette.accentDark})`,
@@ -391,15 +380,18 @@ export default function ReligiousChatbot() {
                 cursor: "pointer", color: "#fff", fontSize: 16,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 boxShadow: "0 3px 12px #c9a96e55",
-                transition: "opacity 0.15s", opacity: input.trim() ? 1 : 0.55
+                transition: "opacity 0.15s",
               }}>
-              ➤
+              {isTyping ? "⏳" : "➤"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Click outside to close language dropdown */}
+      {/* Error Toast */}
+      {error && <ErrorToast message={error} onClose={() => setError(null)} />}
+
+      {/* Click outside to close dropdown */}
       {showLangDropdown && (
         <div onClick={() => setShowLangDropdown(false)}
           style={{ position: "fixed", inset: 0, zIndex: 50 }} />
