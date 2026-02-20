@@ -4,11 +4,10 @@ const LANGUAGES = ["English", "Sinhala", "Tamil"];
 
 const RECENT_CHATS = [
   { id: 1, title: "Understanding Karma", time: "2h ago" },
-  { id: 2, title: "Islamic prayer timings", time: "Yesterday" },
-  { id: 3, title: "Biblical forgiveness", time: "2 days ago" },
-  { id: 4, title: "Meditation techniques", time: "3 days ago" },
 ];
 
+// ─── Config ───────────────────────────────────────────────
+const API_BASE = "http://localhost:8000";
 
 // ─── SVG Watermark ────────────────────────────────────────
 const DharmaWheelSVG = () => (
@@ -61,6 +60,50 @@ const BotAvatar = ({ size = 32 }) => (
   </div>
 );
 
+// ─── Source Pills ─────────────────────────────────────────
+const SourcePills = ({ sources, palette }) => {
+  if (!sources || sources.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+      {sources.map((src, i) => (
+        <span key={i} style={{
+          fontSize: 10.5, padding: "3px 10px", borderRadius: 20,
+          background: palette.hover, color: palette.accentDark,
+          border: `1px solid ${palette.sidebarBorder}`,
+          fontFamily: "'Cinzel', serif", letterSpacing: 0.5
+        }}>
+          📖 {src}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+// ─── Confidence Warning ───────────────────────────────────
+const ConfidenceWarning = ({ palette }) => (
+  <div style={{
+    marginTop: 8, fontSize: 11, color: "#a0622a",
+    background: "#fff3e0", border: "1px solid #f5c78e",
+    borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 5
+  }}>
+    ⚠️ Low confidence — please verify this with a religious scholar.
+  </div>
+);
+
+// ─── Error Toast ──────────────────────────────────────────
+const ErrorToast = ({ message, onClose }) => (
+  <div style={{
+    position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)",
+    background: "#3d0f0f", color: "#ffd5d5", padding: "12px 20px",
+    borderRadius: 12, fontSize: 13, zIndex: 999,
+    boxShadow: "0 4px 20px #0004", display: "flex", alignItems: "center", gap: 10
+  }}>
+    ❌ {message}
+    <button onClick={onClose} style={{ background: "none", border: "none", color: "#ffd5d5", cursor: "pointer", fontSize: 16 }}>×</button>
+  </div>
+);
+
+// ─── Main Component ───────────────────────────────────────
 export default function ReligiousChatbot() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [messages, setMessages] = useState([]);
@@ -74,28 +117,71 @@ export default function ReligiousChatbot() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  // Check backend health on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/`)
+      .then(r => r.ok ? setIsConnected(true) : setIsConnected(false))
+      .catch(() => setIsConnected(false));
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    const userMsg = { id: Date.now(), role: "user", text: input };
+  // ── Send message to FastAPI ──────────────────────────────
+  const handleSend = async () => {
+    if (!input.trim() || isTyping) return;
+
+    const userText = input.trim();
+    const userMsg = { id: Date.now(), role: "user", text: userText };
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: userText,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
       setMessages(prev => [...prev, {
         id: Date.now() + 1,
         role: "bot",
-        text: "Across all traditions, wisdom calls us to pause before reacting. The Bhagavad Gita speaks of equanimity; the Quran urges patience; the Bible speaks of peace that surpasses understanding. Would you like to explore a specific tradition's guidance?"
+        text: data.answer,
+        sources: data.sources || [],
+        warning: data.confidence_warning || false,
       }]);
-    }, 1800);
+
+      setIsConnected(true);
+
+    } catch (err) {
+      setError(err.message || "Could not reach the server. Is it running?");
+      setIsConnected(false);
+      // Remove the user message optimistically added, or keep it — keeping is better UX
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
+
+  const handleNewChat = () => {
+    setMessages([]);
+    setActiveChat(null);
+    setError(null);
   };
 
   const palette = {
@@ -107,11 +193,14 @@ export default function ReligiousChatbot() {
     accentDark: "#8b6914",
     text: "#3d2e0f",
     textMuted: "#7a6040",
-    userBubble: "#c9a96e",
     botBubble: "#fff8ee",
     inputBg: "#faf4e8",
     hover: "#e8d5b0",
   };
+
+  // Connection status indicator color
+  const connColor = isConnected === null ? "#aaa" : isConnected ? "#4caf50" : "#e53935";
+  const connLabel = isConnected === null ? "Checking..." : isConnected ? "Connected" : "Offline";
 
   return (
     <div style={{
@@ -133,10 +222,13 @@ export default function ReligiousChatbot() {
         .icon-btn:hover { background: #e8d5b088 !important; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+        @keyframes connPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
         .msg-anim { animation: fadeUp 0.35s ease forwards; }
         .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #c9a96e; animation: pulse 1.2s infinite; margin: 0 2px; }
         .dot:nth-child(2) { animation-delay: 0.2s; }
         .dot:nth-child(3) { animation-delay: 0.4s; }
+        .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .send-btn:not(:disabled):hover { opacity: 0.85; }
       `}</style>
 
       {/* Sidebar */}
@@ -158,7 +250,7 @@ export default function ReligiousChatbot() {
           </div>
 
           {/* New Chat */}
-          <button className="sidebar-btn" onClick={() => { setMessages([]); setActiveChat(null); }}
+          <button className="sidebar-btn" onClick={handleNewChat}
             style={{
               width: "100%", padding: "10px 14px", borderRadius: 10,
               border: `1.5px solid ${palette.accent}`, background: "transparent",
@@ -188,22 +280,29 @@ export default function ReligiousChatbot() {
               </div>
             ))}
           </div>
+        </div>
 
         {/* User Profile pinned to bottom */}
-          <div style={{
-            position: "absolute", bottom: 0, left: 0, right: 0,
-            padding: "12px 14px",
-            borderTop: `1px solid ${palette.sidebarBorder}`,
-            background: palette.sidebar,
+        <div style={{
+          position: "absolute", bottom: 0, left: 0, right: 0,
+          padding: "12px 14px",
+          borderTop: `1px solid ${palette.sidebarBorder}`,
+          background: palette.sidebar,
           display: "flex", alignItems: "center", gap: 10,
           opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s"
-          }}>
+        }}>
           <UserAvatar name="User" size={34} />
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: palette.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Alexander</div>
-              <div style={{ fontSize: 10, color: palette.textMuted }}>Seeker</div>
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>Seeker</div>
+            {/* API connection status */}
+            <div style={{ fontSize: 10, color: connColor, display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{
+                display: "inline-block", width: 6, height: 6, borderRadius: "50%",
+                background: connColor,
+                animation: isConnected === null ? "connPulse 1s infinite" : "none"
+              }} />
+              {connLabel}
             </div>
-            <span style={{ fontSize: 16, cursor: "pointer", color: palette.textMuted }}>⌄</span>
           </div>
         </div>
       </div>
@@ -290,6 +389,19 @@ export default function ReligiousChatbot() {
             <DharmaWheelSVG />
           </div>
 
+          {/* Empty state */}
+          {messages.length === 0 && !isTyping && (
+            <div style={{
+              position: "absolute", top: "50%", left: "50%",
+              transform: "translate(-50%, -50%)",
+              textAlign: "center", color: palette.textMuted, zIndex: 1,
+              pointerEvents: "none"
+            }}>
+              <div style={{ fontSize: 38, marginBottom: 12 }}>🪷</div>
+              <div style={{ fontFamily: "'Cinzel', serif", fontSize: 14, letterSpacing: 1 }}>Ask a question about Buddhism</div>
+            </div>
+          )}
+
           {/* Messages */}
           <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
             {messages.map((msg) => (
@@ -302,17 +414,17 @@ export default function ReligiousChatbot() {
                 {msg.role === "bot" ? <BotAvatar size={30} /> : <UserAvatar name="U" size={30} />}
                 <div style={{ maxWidth: "58%", display: "flex", flexDirection: "column" }}>
                   <div style={{
-                  background: msg.role === "user"
-                    ? `linear-gradient(135deg, ${palette.accent}, ${palette.accentDark})`
-                    : palette.botBubble,
-                  color: msg.role === "user" ? "#fff" : palette.text,
-                  borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                  padding: "12px 16px",
-                  fontSize: 13.5, lineHeight: 1.65,
+                    background: msg.role === "user"
+                      ? `linear-gradient(135deg, ${palette.accent}, ${palette.accentDark})`
+                      : palette.botBubble,
+                    color: msg.role === "user" ? "#fff" : palette.text,
+                    borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                    padding: "12px 16px",
+                    fontSize: 13.5, lineHeight: 1.65,
                     boxShadow: msg.role === "user" ? "0 4px 16px #c9a96e44" : "0 2px 12px #0000000d",
-                  border: msg.role === "bot" ? `1px solid ${palette.sidebarBorder}` : "none"
-                }}>
-                  {msg.text}
+                    border: msg.role === "bot" ? `1px solid ${palette.sidebarBorder}` : "none"
+                  }}>
+                    {msg.text}
                   </div>
                   {/* Sources */}
                   {msg.role === "bot" && <SourcePills sources={msg.sources} palette={palette} />}
@@ -344,12 +456,24 @@ export default function ReligiousChatbot() {
           padding: "14px 10%", background: palette.header,
           borderTop: `1px solid ${palette.sidebarBorder}`
         }}>
+          {/* Offline banner */}
+          {isConnected === false && (
+            <div style={{
+              background: "#fff3e0", border: "1px solid #f5c78e",
+              borderRadius: 10, padding: "8px 14px", marginBottom: 10,
+              fontSize: 12, color: "#a0622a", display: "flex", alignItems: "center", gap: 8
+            }}>
+              ⚠️ Backend offline — start your FastAPI server: <code style={{ background: "#fde8c8", padding: "1px 6px", borderRadius: 4 }}>uvicorn main:app --reload</code>
+            </div>
+          )}
+
           <div style={{
             display: "flex", alignItems: "center",
             background: palette.inputBg,
-            border: `1.5px solid ${palette.sidebarBorder}`,
+            border: `1.5px solid ${isConnected === false ? "#f5c78e" : palette.sidebarBorder}`,
             borderRadius: 16, padding: "10px 16px", gap: 10,
-            boxShadow: "0 2px 8px #0000000a"
+            boxShadow: "0 2px 8px #0000000a",
+            transition: "border-color 0.2s"
           }}>
             <textarea
               ref={inputRef}
@@ -357,8 +481,9 @@ export default function ReligiousChatbot() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a new message here"
+              placeholder={isConnected === false ? "Server offline..." : "Type a new message here"}
               rows={1}
+              disabled={isTyping}
               style={{
                 flex: 1, background: "transparent", border: "none",
                 fontFamily: "'Lora', serif", fontSize: 13.5, color: palette.text,

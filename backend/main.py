@@ -1,146 +1,233 @@
 import os
 import sys
-import subprocess
 from pathlib import Path
+from contextlib import asynccontextmanager
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Paths
-# ═══════════════════════════════════════════════════════════════════════════════
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+# ═══════════════════════════════════════════════════════════
+# Paths  (mirrors the layout used in all your other modules)
+# ═══════════════════════════════════════════════════════════
 
 BASE_DIR        = Path(__file__).parent
 DATA_DIR        = BASE_DIR / "data"
-CORPUS_PATH     = DATA_DIR / "tipitaka_raw.json"
-CHUNKS_PATH     = DATA_DIR / "chunks.json"
-FAISS_PATH      = DATA_DIR / "faiss_index.bin"
-EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"
+SECTIONS_DIR    = DATA_DIR / "sections"
+CHECKPOINT_PATH = DATA_DIR / "checkpoint.json"
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Step helpers
-# ═══════════════════════════════════════════════════════════════════════════════
+# Files that chunk_and_embed.py produces
+CORPUS_PATH     = DATA_DIR / "tipitaka_raw.json"   # produced by data_loader.py
+CHUNKS_PATH     = DATA_DIR / "chunks.json"          # produced by chunk_and_embed.py
+EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"       # produced by chunk_and_embed.py
+FAISS_PATH      = DATA_DIR / "faiss_index.bin"      # produced by chunk_and_embed.py
 
-def _env_check():
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
-        print(
-            "\n  ℹ  GITHUB_TOKEN not set.\n"
-            "     File downloads use raw.githubusercontent.com (unmetered).\n"
-            "     Set GITHUB_TOKEN only if you run this script many times per hour.\n"
-        )
+# ═══════════════════════════════════════════════════════════
+# Startup helpers
+# ═══════════════════════════════════════════════════════════
 
-    groq_key = os.environ.get("GROQ_API_KEY", "")
-    if not groq_key:
-        # Try loading from .env manually as a fallback hint
-        env_file = BASE_DIR / ".env"
-        if env_file.exists():
-            print("  ℹ  .env file found — GROQ_API_KEY will be loaded from it.\n")
-        else:
-            print(
-                "\n  ⚠  GROQ_API_KEY is not set and no .env file found.\n"
-                "     Create a .env file in this folder with:\n"
-                "       GROQ_API_KEY=your_key_here\n"
-                "     Get your free key at https://console.groq.com\n"
-            )
+def _banner(title: str):
+    print(f"\n{'═' * 55}")
+    print(f"  {title}")
+    print(f"{'═' * 55}")
+
+
+def _check_env_vars():
+    """
+    Confirm GROQ_API_KEY is present — rag_answer.py raises
+    EnvironmentError immediately if it is missing, so we surface
+    a clear message before anything else runs.
+    """
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    key = os.environ.get("GROQ_API_KEY", "")
+    if not key:
+        print("  ❌  GROQ_API_KEY is not set.")
+        print("      Create a .env file in your backend folder:")
+        print("        GROQ_API_KEY=your_key_here")
+        print("      Get a free key at https://console.groq.com\n")
+        sys.exit(1)
+    else:
+        masked = key[:8] + "*" * (len(key) - 8)
+        print(f"  ✅  GROQ_API_KEY is set  ({masked})")
+
+
+def _run_data_loader():
+    """Download the raw Tipitaka corpus via data_loader.download_tipitaka()."""
+    print("\n  📥  Running data_loader.download_tipitaka()…")
+    try:
+        from data_loader import download_tipitaka
+        download_tipitaka()
+        print(f"  ✅  Corpus saved → {CORPUS_PATH.relative_to(BASE_DIR)}")
+    except Exception as exc:
+        print(f"  ❌  data_loader failed: {exc}")
+        sys.exit(1)
+
+
+def _run_chunk_and_embed():
+    """
+    chunk_and_embed.py is a top-level script so we run it via runpy,
+    producing chunks.json, embeddings.npy, and faiss_index.bin.
+    """
+    print("\n  🔢  Running chunk_and_embed pipeline…")
+    try:
+        import runpy
+        runpy.run_path(str(BASE_DIR / "chunk_and_embed.py"), run_name="__main__")
+        print("  ✅  chunks.json, embeddings.npy, faiss_index.bin created.")
+    except Exception as exc:
+        print(f"  ❌  chunk_and_embed failed: {exc}")
+        sys.exit(1)
+
+
+# ═══════════════════════════════════════════════════════════
+# Main startup sequence
+# ═══════════════════════════════════════════════════════════
+
+def check_and_build():
+    """
+    Full startup sequence:
+      0. Check environment variables (GROQ_API_KEY)
+      1. Ensure data/ and sections/ directories exist
+      2. Check raw corpus  → run data_loader if missing
+      3. Check embedding artefacts → run chunk_and_embed if missing
+      4. Warm-up: run one query through rag_answer to verify & pre-load
+    """
+    _banner("Sacred Wisdom — Startup Check")
+
+    # ── 0. Environment ─────────────────────────────────────
+    _check_env_vars()
+
+    # ── 1. Ensure directories exist ────────────────────────
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"  ✅  data/       : {DATA_DIR.relative_to(BASE_DIR)}")
+    print(f"  ✅  sections/   : {SECTIONS_DIR.relative_to(BASE_DIR)}")
+
+    # ── 2. Check for raw corpus ─────────────────────────────
+    corpus_ok = CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 0
+    if corpus_ok:
+        size_mb = CORPUS_PATH.stat().st_size / 1_048_576
+        print(f"  ✅  tipitaka_raw.json  ({size_mb:.1f} MB)")
+    else:
+        print(f"  ❌  tipitaka_raw.json  — not found or empty")
+
+    # ── 3. Check for embedding artefacts ───────────────────
+    chunks_ok     = CHUNKS_PATH.exists()     and CHUNKS_PATH.stat().st_size > 0
+    embeddings_ok = EMBEDDINGS_PATH.exists() and EMBEDDINGS_PATH.stat().st_size > 0
+    faiss_ok      = FAISS_PATH.exists()      and FAISS_PATH.stat().st_size > 0
+
+    for label, ok in [
+        ("chunks.json",     chunks_ok),
+        ("embeddings.npy",  embeddings_ok),
+        ("faiss_index.bin", faiss_ok),
+    ]:
+        print(f"  {'✅' if ok else '❌'}  {label}")
+
+    # ── 4. Run missing build steps ──────────────────────────
+    if not corpus_ok:
+        print("\n  ⚠️   Raw corpus missing — running data_loader…")
+        _run_data_loader()
+        corpus_ok = CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 0
+        if not corpus_ok:
+            print("  ❌  Corpus still missing after download. Aborting.")
             sys.exit(1)
 
+    if not (chunks_ok and embeddings_ok and faiss_ok):
+        print("\n  ⚠️   Embedding artefacts missing — running chunk_and_embed…")
+        _run_chunk_and_embed()
 
-def _step_download():
-    """Download corpus if not already present."""
-    if CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 1000:
-        print(f"  ✓ Corpus already downloaded → {CORPUS_PATH}")
-        return
+    # ── 5. Final file confirmation ──────────────────────────
+    all_present = all([
+        CORPUS_PATH.exists(),
+        CHUNKS_PATH.exists(),
+        EMBEDDINGS_PATH.exists(),
+        FAISS_PATH.exists(),
+    ])
 
-    print("\n━━━  STEP 1: Downloading Tipitaka Corpus  ━━━\n")
-    from data_loader import download_tipitaka
-    download_tipitaka()
-    print(f"  ✓ Corpus saved → {CORPUS_PATH}")
+    if not all_present:
+        print("\n  ❌  One or more required files are still missing. Aborting.")
+        sys.exit(1)
 
+    # ── 6. Pre-load retrieve.py into memory ────────────────
+    # retrieve.py loads the SentenceTransformer model and FAISS index
+    # at module import time. Importing it here means that work is done
+    # once at startup, so the first user query is answered instantly.
+    print("\n  🔄  Pre-loading embedding model and FAISS index…")
+    try:
+        import retrieve  # noqa: F401  — side-effect import is intentional
+        print("  ✅  Model and index loaded into memory.")
+    except Exception as exc:
+        print(f"  ❌  Failed to pre-load retrieve.py: {exc}")
+        sys.exit(1)
 
-def _step_chunk_and_embed():
-    """Build chunks + FAISS index if not already present."""
-    if CHUNKS_PATH.exists() and FAISS_PATH.exists():
-        import json
-        chunk_count = len(json.loads(CHUNKS_PATH.read_text(encoding="utf-8")))
-        print(f"  ✓ Chunks already built ({chunk_count:,} chunks) → {CHUNKS_PATH}")
-        print(f"  ✓ FAISS index already built → {FAISS_PATH}")
-        return
-
-    print("\n━━━  STEP 2: Chunking & Embedding  ━━━\n")
-    result = subprocess.run(
-        [sys.executable, str(BASE_DIR / "chunk_and_embed.py")],
-        check=True
-    )
-    print("  ✓ Chunks and FAISS index built successfully.")
-
-
-def _print_banner():
-    print("\n" + "═" * 55)
-    print("   🪷  Buddhist AI Chatbot  🪷")
-    print("   Powered by: Groq  (llama-3.1-8b-instant)")
-    print("   Knowledge:  Pali Canon (Sutta, Vinaya, Abhidhamma)")
-    print("═" * 55)
-    print("   Type your question and press Enter.")
-    print("   Type 'quit' or 'exit' to end the session.")
+    print(f"\n  All files present. Starting chatbot... 🪷")
     print("═" * 55 + "\n")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Main
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# FastAPI lifespan
+# ═══════════════════════════════════════════════════════════
 
-def main():
-    _env_check()
-
-    # ── Step 1: Download corpus ───────────────────────────────────────────────
-    _step_download()
-
-    # ── Step 2: Chunk + embed ─────────────────────────────────────────────────
-    _step_chunk_and_embed()
-
-    # ── Step 3: Launch chatbot ────────────────────────────────────────────────
-    print("\n━━━  STEP 3: Starting Chatbot  ━━━")
-
-    from rag_answer import answer_question, GROQ_MODEL
-
-    _print_banner()
-
-    while True:
-        try:
-            question = input("Ask: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\n\nGoodbye. May you be well. 🙏")
-            break
-
-        if not question:
-            continue
-
-        if question.lower() in ("quit", "exit", "q"):
-            print("\nGoodbye. May you be well. 🙏")
-            break
-
-        print("\n  Searching scriptures...\n")
-
-        result = answer_question(question)
-
-        print("─" * 55)
-        print(result["answer"])
-        print("─" * 55)
-
-        if result["sources"]:
-            print("\n📖 Sources:")
-            for book, score in zip(result["sources"], result["scores"]):
-                print(f"   • {book}  (relevance: {score:.3f})")
-
-        if result.get("flagged"):
-            print(f"\n⚠  Input flagged: {', '.join(result['warnings'])}")
-
-        if result.get("low_confidence"):
-            print("\n⚠  Low confidence — no strong scriptural match found.")
-
-        if result.get("warnings") and not result.get("flagged"):
-            print(f"\n[Warnings: {', '.join(result['warnings'])}]")
-
-        print()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    check_and_build()
+    yield
+    print("\nSacred Wisdom API shutting down gracefully.")
 
 
-if __name__ == "__main__":
-    main()
+# ═══════════════════════════════════════════════════════════
+# App
+# ═══════════════════════════════════════════════════════════
+
+app = FastAPI(
+    title="Multi-Religious Chatbot API",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",    # Vite dev server
+        "http://localhost:3000",    # fallback (Create React App)
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ═══════════════════════════════════════════════════════════
+# Request / Response models
+# ═══════════════════════════════════════════════════════════
+
+class QuestionRequest(BaseModel):
+    question: str
+    religion: str = "Buddhism"
+    language: str = "en"
+
+# ═══════════════════════════════════════════════════════════
+# Routes
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/")
+def root():
+    return {"message": "Multi-Religious Chatbot API is running"}
+
+
+@app.post("/ask")
+def ask_question(request: QuestionRequest):
+    from rag_answer import answer_question
+
+    result = answer_question(
+        question=request.question,
+        religion=request.religion,
+        language=request.language,
+    )
+
+    return {
+        "answer":             result["answer"],
+        "sources":            result.get("sources", []),
+        "scores":             result.get("scores", []),
+        "confidence_warning": result.get("low_confidence", False),
+        "flagged":            result.get("flagged", False),
+        "warnings":           result.get("warnings", []),
+    }
