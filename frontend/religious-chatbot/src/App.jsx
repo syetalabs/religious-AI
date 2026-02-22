@@ -140,11 +140,12 @@ export default function ReligiousChatbot() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/ask`, {
+      const response = await fetch("http://localhost:8000/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: userText,
+          language: language,        // ← send selected language
         }),
       });
 
@@ -159,8 +160,8 @@ export default function ReligiousChatbot() {
         id: Date.now() + 1,
         role: "bot",
         text: data.answer,
-        sources: data.sources || [],
-        warning: data.confidence_warning || false,
+        sources: data.sources,
+        warning: data.confidence_warning,
       }]);
 
       setIsConnected(true);
@@ -481,7 +482,15 @@ export default function ReligiousChatbot() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isConnected === false ? "Server offline..." : "Type a new message here"}
+              placeholder={
+                isConnected === false
+                  ? "Server offline..."
+                  : language === "Sinhala"
+                  ? "ඔබේ පණිවිඩය මෙහි ටයිප් කරන්න..."
+                  : language === "Tamil"
+                  ? "உங்கள் செய்தியை இங்கே தட்டச்சு செய்யுங்கள்..."
+                  : "Type a new message here"
+              }
               rows={1}
               disabled={isTyping}
               style={{

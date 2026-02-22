@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # ═══════════════════════════════════════════════════════════
-# Paths  (mirrors the layout used in all your other modules)
+# Paths
 # ═══════════════════════════════════════════════════════════
 
 BASE_DIR        = Path(__file__).parent
@@ -33,11 +33,6 @@ def _banner(title: str):
 
 
 def _check_env_vars():
-    """
-    Confirm GROQ_API_KEY is present — rag_answer.py raises
-    EnvironmentError immediately if it is missing, so we surface
-    a clear message before anything else runs.
-    """
     from dotenv import load_dotenv
     load_dotenv()
 
@@ -49,12 +44,10 @@ def _check_env_vars():
         print("      Get a free key at https://console.groq.com\n")
         sys.exit(1)
     else:
-        masked = key[:8] + "*" * (len(key) - 8)
-        print(f"  ✅  GROQ_API_KEY is set  ({masked})")
+        print(f"  ✅  GROQ_API_KEY is set.")
 
 
 def _run_data_loader():
-    """Download the raw Tipitaka corpus via data_loader.download_tipitaka()."""
     print("\n  📥  Running data_loader.download_tipitaka()…")
     try:
         from data_loader import download_tipitaka
@@ -66,10 +59,6 @@ def _run_data_loader():
 
 
 def _run_chunk_and_embed():
-    """
-    chunk_and_embed.py is a top-level script so we run it via runpy,
-    producing chunks.json, embeddings.npy, and faiss_index.bin.
-    """
     print("\n  🔢  Running chunk_and_embed pipeline…")
     try:
         import runpy
@@ -85,26 +74,18 @@ def _run_chunk_and_embed():
 # ═══════════════════════════════════════════════════════════
 
 def check_and_build():
-    """
-    Full startup sequence:
-      0. Check environment variables (GROQ_API_KEY)
-      1. Ensure data/ and sections/ directories exist
-      2. Check raw corpus  → run data_loader if missing
-      3. Check embedding artefacts → run chunk_and_embed if missing
-      4. Warm-up: run one query through rag_answer to verify & pre-load
-    """
     _banner("Sacred Wisdom — Startup Check")
 
-    # ── 0. Environment ─────────────────────────────────────
+    # ── 0. Environment ──────────────────────────────────────
     _check_env_vars()
 
-    # ── 1. Ensure directories exist ────────────────────────
+    # ── 1. Directories ──────────────────────────────────────
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"  ✅  data/       : {DATA_DIR.relative_to(BASE_DIR)}")
-    print(f"  ✅  sections/   : {SECTIONS_DIR.relative_to(BASE_DIR)}")
+    print(f"  ✅  data/     : {DATA_DIR.relative_to(BASE_DIR)}")
+    print(f"  ✅  sections/ : {SECTIONS_DIR.relative_to(BASE_DIR)}")
 
-    # ── 2. Check for raw corpus ─────────────────────────────
+    # ── 2. Raw corpus ───────────────────────────────────────
     corpus_ok = CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 0
     if corpus_ok:
         size_mb = CORPUS_PATH.stat().st_size / 1_048_576
@@ -112,7 +93,7 @@ def check_and_build():
     else:
         print(f"  ❌  tipitaka_raw.json  — not found or empty")
 
-    # ── 3. Check for embedding artefacts ───────────────────
+    # ── 3. Embedding artefacts ──────────────────────────────
     chunks_ok     = CHUNKS_PATH.exists()     and CHUNKS_PATH.stat().st_size > 0
     embeddings_ok = EMBEDDINGS_PATH.exists() and EMBEDDINGS_PATH.stat().st_size > 0
     faiss_ok      = FAISS_PATH.exists()      and FAISS_PATH.stat().st_size > 0
@@ -124,7 +105,7 @@ def check_and_build():
     ]:
         print(f"  {'✅' if ok else '❌'}  {label}")
 
-    # ── 4. Run missing build steps ──────────────────────────
+    # ── 4. Build missing steps ──────────────────────────────
     if not corpus_ok:
         print("\n  ⚠️   Raw corpus missing — running data_loader…")
         _run_data_loader()
@@ -137,7 +118,7 @@ def check_and_build():
         print("\n  ⚠️   Embedding artefacts missing — running chunk_and_embed…")
         _run_chunk_and_embed()
 
-    # ── 5. Final file confirmation ──────────────────────────
+    # ── 5. Final check ──────────────────────────────────────
     all_present = all([
         CORPUS_PATH.exists(),
         CHUNKS_PATH.exists(),
@@ -149,19 +130,16 @@ def check_and_build():
         print("\n  ❌  One or more required files are still missing. Aborting.")
         sys.exit(1)
 
-    # ── 6. Pre-load retrieve.py into memory ────────────────
-    # retrieve.py loads the SentenceTransformer model and FAISS index
-    # at module import time. Importing it here means that work is done
-    # once at startup, so the first user query is answered instantly.
+    # ── 6. Pre-load retrieve.py ─────────────────────────────
     print("\n  🔄  Pre-loading embedding model and FAISS index…")
     try:
-        import retrieve  # noqa: F401  — side-effect import is intentional
+        import retrieve  # noqa: F401
         print("  ✅  Model and index loaded into memory.")
     except Exception as exc:
         print(f"  ❌  Failed to pre-load retrieve.py: {exc}")
         sys.exit(1)
 
-    print(f"\n  All files present. Starting chatbot... 🪷")
+    print(f"\n  All checks passed. Starting chatbot... 🪷")
     print("═" * 55 + "\n")
 
 
@@ -188,8 +166,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",    # Vite dev server
-        "http://localhost:3000",    # fallback (Create React App)
+        "http://localhost:5173",
+        "http://localhost:3000",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
@@ -202,7 +180,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     religion: str = "Buddhism"
-    language: str = "en"
+    language: str = "English"   # "English" | "Sinhala" | "Tamil"
 
 # ═══════════════════════════════════════════════════════════
 # Routes
@@ -216,15 +194,23 @@ def root():
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
     from rag_answer import answer_question
+    from translator import translate_to_english, translate_from_english
 
+    # Step 1 — translate question to English for the RAG pipeline
+    english_question = translate_to_english(request.question, request.language)
+
+    # Step 2 — run through RAG (always in English)
     result = answer_question(
-        question=request.question,
+        question=english_question,
         religion=request.religion,
-        language=request.language,
+        language="en",
     )
 
+    # Step 3 — translate the answer back to the user's language
+    translated_answer = translate_from_english(result["answer"], request.language)
+
     return {
-        "answer":             result["answer"],
+        "answer":             translated_answer,
         "sources":            result.get("sources", []),
         "scores":             result.get("scores", []),
         "confidence_warning": result.get("low_confidence", False),
