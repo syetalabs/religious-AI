@@ -74,7 +74,7 @@ def _run_chunk_and_embed():
 # ═══════════════════════════════════════════════════════════
 
 def check_and_build():
-    _banner("Sacred Wisdom — Startup Check")
+    _banner("Startup Check")
 
     # ── 0. Environment ──────────────────────────────────────
     _check_env_vars()
@@ -151,7 +151,7 @@ def check_and_build():
 async def lifespan(app: FastAPI):
     check_and_build()
     yield
-    print("\nSacred Wisdom API shutting down gracefully.")
+    print("\nAPI shutting down gracefully.")
 
 
 # ═══════════════════════════════════════════════════════════
