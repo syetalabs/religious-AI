@@ -111,58 +111,132 @@ def _get_json(url: str) -> dict | None:
             resp = _session.get(url, timeout=TIMEOUT)
             if resp.status_code == 404:
                 return None
-            # 429 Too Many Requests — honour Retry-After or use exponential backoff
+            if resp.status_code not in (200, 429):
+                print(f"  [debug] HTTP {resp.status_code} | body: {resp.text[:300]}", flush=True)
             if resp.status_code == 429:
                 retry_after = int(resp.headers.get("Retry-After", 0))
                 wait = retry_after if retry_after > 0 else min(15 * attempt, 120)
-                tqdm.write(f"  [429] rate-limited — waiting {wait}s (attempt {attempt}/{MAX_RETRIES})")
+                print(f"  [429] rate-limited — waiting {wait}s (attempt {attempt}/{MAX_RETRIES})", flush=True)
                 time.sleep(wait)
-                continue   # retry the same attempt counter
+                continue
             resp.raise_for_status()
             time.sleep(REQUEST_DELAY)
-            return resp.json()
+            try:
+                return resp.json()
+            except Exception:
+                print(f"  [debug] non-JSON ({resp.status_code}): {resp.text[:300]}", flush=True)
+                return None
         except requests.exceptions.Timeout:
-            if attempt == MAX_RETRIES:
-                tqdm.write(f"  [timeout] {url}")
-            else:
+            print(f"  [timeout] attempt {attempt}/{MAX_RETRIES}: {url}", flush=True)
+            if attempt < MAX_RETRIES:
+                time.sleep(2 ** attempt)
+        except requests.exceptions.ConnectionError as exc:
+            print(f"  [connection-error] attempt {attempt}/{MAX_RETRIES}: {exc}", flush=True)
+            if attempt < MAX_RETRIES:
                 time.sleep(2 ** attempt)
         except requests.exceptions.HTTPError as exc:
             code = exc.response.status_code
+            print(f"  [http {code}] attempt {attempt}/{MAX_RETRIES}: {url}", flush=True)
             if 500 <= code < 600 and attempt < MAX_RETRIES:
                 time.sleep(2 ** attempt)
             else:
-                tqdm.write(f"  [http {code}] {url}")
                 return None
         except Exception as exc:
-            tqdm.write(f"  [error] {exc}")
+            print(f"  [error] {type(exc).__name__}: {exc}", flush=True)
             return None
+    print(f"  [gave-up] all {MAX_RETRIES} attempts failed: {url}", flush=True)
     return None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Bible API fetcher
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def fetch_chapter(book: str, chapter: int) -> list[str]:
-    """
-    Fetch all verses from a single chapter via bible-api.com.
-    Returns a list of verse strings, each prefixed with the verse number.
-    e.g. ["1 In the beginning God created...", "2 And the earth was..."]
-    """
-    # bible-api.com query format: "John 3" or "1+Corinthians+3"
-    query = f"{book} {chapter}".replace(" ", "+")
-    url   = f"{BIBLE_API_BASE}/{query}?translation={TRANSLATION}"
-    data  = _get_json(url)
+# Compact slugs used by bible-api.com for books with numbers/spaces in the name.
+_BOOK_SLUG: dict[str, str] = {
+    "1 Samuel":        "1samuel",
+    "2 Samuel":        "2samuel",
+    "1 Kings":         "1kings",
+    "2 Kings":         "2kings",
+    "1 Chronicles":    "1chronicles",
+    "2 Chronicles":    "2chronicles",
+    "1 Corinthians":   "1corinthians",
+    "2 Corinthians":   "2corinthians",
+    "1 Thessalonians": "1thessalonians",
+    "2 Thessalonians": "2thessalonians",
+    "1 Timothy":       "1timothy",
+    "2 Timothy":       "2timothy",
+    "1 Peter":         "1peter",
+    "2 Peter":         "2peter",
+    "1 John":          "1john",
+    "2 John":          "2john",
+    "3 John":          "3john",
+    "Song of Solomon": "songofsolomon",
+}
 
-    if not data or "verses" not in data:
-        return []
+# For single-chapter books, bible-api.com whole-book queries are unreliable.
+# Instead we use an explicit verse-range request: "<slug>+1:1-<N>"
+# which is unambiguous and always returns the full verse array.
+_SINGLE_CHAPTER_VERSE_COUNT: dict[str, int] = {
+    "Obadiah":  21,
+    "Philemon": 25,
+    "2 John":   13,
+    "3 John":   14,
+    "Jude":     25,
+}
 
+
+def _build_url(book: str, chapter: int, total_chapters: int) -> str:
+    slug = _BOOK_SLUG.get(book, book)
+    # Normal multi-chapter fetch: "1corinthians+13"
+    path = f"{slug}+{chapter}".replace(" ", "+")
+    return f"{BIBLE_API_BASE}/{path}?translation={TRANSLATION}"
+
+
+def _build_verse_url(book: str, chapter: int, verse: int) -> str:
+    """Build a single-verse URL: e.g. https://bible-api.com/3john+1:3?translation=kjv"""
+    slug = _BOOK_SLUG.get(book, book)
+    path = f"{slug}+{chapter}:{verse}".replace(" ", "+")
+    return f"{BIBLE_API_BASE}/{path}?translation={TRANSLATION}"
+
+
+def _parse_verses(data: dict) -> list[str]:
     verses = []
-    for v in data["verses"]:
-        text = v.get("text", "").strip()
+    for v in data.get("verses", []):
+        text      = v.get("text", "").strip()
         verse_num = v.get("verse", "")
         if text:
             verses.append(f"{verse_num} {text}")
     return verses
+
+
+def fetch_chapter(book: str, chapter: int, total_chapters: int) -> list[str]:
+    """
+    Fetch all verses from a chapter via bible-api.com.
+
+    Single-chapter books use a verse-by-verse loop to avoid all URL ambiguity —
+    range queries like '3john+1:1-15' are unreliable on this API.
+    Multi-chapter books use the standard chapter-level request.
+    """
+    if total_chapters == 1:
+        # Fetch verse by verse — guaranteed unambiguous for all single-chapter books
+        n_verses = _SINGLE_CHAPTER_VERSE_COUNT.get(book, 30)
+        all_verses = []
+        for v_num in range(1, n_verses + 1):
+            url  = _build_verse_url(book, chapter, v_num)
+            data = _get_json(url)
+            if data and "verses" in data:
+                parsed = _parse_verses(data)
+                all_verses.extend(parsed)
+            else:
+                # Stop early if verse doesn't exist (handles books with fewer verses than estimated)
+                break
+        return all_verses
+    else:
+        url  = _build_url(book, chapter, total_chapters)
+        data = _get_json(url)
+        if not data or "verses" not in data:
+            return []
+        return _parse_verses(data)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Checkpoint & section I/O
@@ -269,7 +343,7 @@ def _download_bible(completed: set[str], stats: dict):
 
         for chapter in pending_chapters:
             key = f"{book}:{chapter}"
-            verses = fetch_chapter(book, chapter)
+            verses = fetch_chapter(book, chapter, num_chapters)
             if verses:
                 book_verses.extend(verses)
                 ok += 1
@@ -294,6 +368,28 @@ def _download_bible(completed: set[str], stats: dict):
 
 def download_bible() -> list[dict]:
     completed, stats = load_checkpoint()
+
+    # ── Force re-fetch all single-chapter books every run until they have
+    #    the correct verse count. This is safe because the section file is
+    #    small and the fix ensures correct data on the next attempt.
+    SINGLE_CHAPTER_BOOKS = [b for b, n in ALL_BOOKS.items() if n == 1]
+    repaired = False
+    for book in SINGLE_CHAPTER_BOOKS:
+        expected = _SINGLE_CHAPTER_VERSE_COUNT.get(book, 0)
+        actual   = stats.get(book, {}).get("verses", 0)
+        key      = f"{book}:1"
+        if actual < expected:
+            tqdm.write(f"  [repair] {book}: has {actual} verses, expected {expected} — re-queuing")
+            completed.discard(key)
+            stats.pop(book, None)
+            safe_name = book.replace(" ", "_")
+            bad_file  = SECTIONS_DIR / f"{safe_name}.json"
+            if bad_file.exists():
+                bad_file.unlink()
+            repaired = True
+    if repaired:
+        save_checkpoint(completed, stats)
+        tqdm.write("  [repair] Checkpoint updated — affected books will be re-downloaded.\n")
 
     _download_bible(completed, stats)
 
