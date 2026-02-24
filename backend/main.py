@@ -11,16 +11,28 @@ from pydantic import BaseModel
 # Paths
 # ═══════════════════════════════════════════════════════════
 
-BASE_DIR        = Path(__file__).parent
-DATA_DIR        = BASE_DIR / "data"
-SECTIONS_DIR    = DATA_DIR / "sections"
-CHECKPOINT_PATH = DATA_DIR / "checkpoint.json"
+BASE_DIR                     = Path(__file__).parent
+BUDDHISM_DIR                 = BASE_DIR.parent / "multi-religion" / "buddhism"
+BUDDHISM_DATA_DIR            = BUDDHISM_DIR / "data"
+BUDDHISM_SECTIONS_DIR        = BUDDHISM_DATA_DIR / "sections"
+BUDDHISM_CHECKPOINT_PATH     = BUDDHISM_DATA_DIR / "checkpoint.json"
 
-# Files that chunk_and_embed.py produces
-CORPUS_PATH     = DATA_DIR / "tipitaka_raw.json"   # produced by data_loader.py
-CHUNKS_PATH     = DATA_DIR / "chunks.json"          # produced by chunk_and_embed.py
-EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"       # produced by chunk_and_embed.py
-FAISS_PATH      = DATA_DIR / "faiss_index.bin"      # produced by chunk_and_embed.py
+BUDDHISM_CORPUS_PATH         = BUDDHISM_DATA_DIR / "tipitaka_raw.json"
+BUDDHISM_CHUNKS_PATH         = BUDDHISM_DATA_DIR / "chunks.json"
+BUDDHISM_EMBEDDINGS_PATH     = BUDDHISM_DATA_DIR / "embeddings.npy"
+BUDDHISM_FAISS_PATH          = BUDDHISM_DATA_DIR / "faiss_index.bin"
+
+# ── Inject path early and unconditionally ──────────────────
+# Done twice: once at module level, once as a guaranteed
+# runtime guard inside each helper — uvicorn's reloader
+# spawns child processes where module-level inserts may not
+# propagate reliably.
+def _ensure_buddhism_path():
+    buddhism_str = str(BUDDHISM_DIR)
+    if buddhism_str not in sys.path:
+        sys.path.insert(0, buddhism_str)
+
+_ensure_buddhism_path()   # module-level call
 
 # ═══════════════════════════════════════════════════════════
 # Startup helpers
@@ -48,21 +60,23 @@ def _check_env_vars():
 
 
 def _run_data_loader():
+    _ensure_buddhism_path()   # guaranteed before import
     print("\n  📥  Running data_loader.download_tipitaka()…")
     try:
         from data_loader import download_tipitaka
         download_tipitaka()
-        print(f"  ✅  Corpus saved → {CORPUS_PATH.relative_to(BASE_DIR)}")
+        print(f"  ✅  Corpus saved → {BUDDHISM_CORPUS_PATH.relative_to(BUDDHISM_DIR)}")
     except Exception as exc:
         print(f"  ❌  data_loader failed: {exc}")
         sys.exit(1)
 
 
 def _run_chunk_and_embed():
+    _ensure_buddhism_path()   # guaranteed before runpy
     print("\n  🔢  Running chunk_and_embed pipeline…")
     try:
         import runpy
-        runpy.run_path(str(BASE_DIR / "chunk_and_embed.py"), run_name="__main__")
+        runpy.run_path(str(BUDDHISM_DIR / "chunk_and_embed.py"), run_name="__main__")
         print("  ✅  chunks.json, embeddings.npy, faiss_index.bin created.")
     except Exception as exc:
         print(f"  ❌  chunk_and_embed failed: {exc}")
@@ -80,23 +94,23 @@ def check_and_build():
     _check_env_vars()
 
     # ── 1. Directories ──────────────────────────────────────
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"  ✅  data/     : {DATA_DIR.relative_to(BASE_DIR)}")
-    print(f"  ✅  sections/ : {SECTIONS_DIR.relative_to(BASE_DIR)}")
+    BUDDHISM_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    BUDDHISM_SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"  ✅  data/     : {BUDDHISM_DATA_DIR.relative_to(BUDDHISM_DIR)}")
+    print(f"  ✅  sections/ : {BUDDHISM_SECTIONS_DIR.relative_to(BUDDHISM_DIR)}")
 
     # ── 2. Raw corpus ───────────────────────────────────────
-    corpus_ok = CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 0
+    corpus_ok = BUDDHISM_CORPUS_PATH.exists() and BUDDHISM_CORPUS_PATH.stat().st_size > 0
     if corpus_ok:
-        size_mb = CORPUS_PATH.stat().st_size / 1_048_576
+        size_mb = BUDDHISM_CORPUS_PATH.stat().st_size / 1_048_576
         print(f"  ✅  tipitaka_raw.json  ({size_mb:.1f} MB)")
     else:
         print(f"  ❌  tipitaka_raw.json  — not found or empty")
 
     # ── 3. Embedding artefacts ──────────────────────────────
-    chunks_ok     = CHUNKS_PATH.exists()     and CHUNKS_PATH.stat().st_size > 0
-    embeddings_ok = EMBEDDINGS_PATH.exists() and EMBEDDINGS_PATH.stat().st_size > 0
-    faiss_ok      = FAISS_PATH.exists()      and FAISS_PATH.stat().st_size > 0
+    chunks_ok     = BUDDHISM_CHUNKS_PATH.exists()     and BUDDHISM_CHUNKS_PATH.stat().st_size > 0
+    embeddings_ok = BUDDHISM_EMBEDDINGS_PATH.exists() and BUDDHISM_EMBEDDINGS_PATH.stat().st_size > 0
+    faiss_ok      = BUDDHISM_FAISS_PATH.exists()      and BUDDHISM_FAISS_PATH.stat().st_size > 0
 
     for label, ok in [
         ("chunks.json",     chunks_ok),
@@ -109,7 +123,7 @@ def check_and_build():
     if not corpus_ok:
         print("\n  ⚠️   Raw corpus missing — running data_loader…")
         _run_data_loader()
-        corpus_ok = CORPUS_PATH.exists() and CORPUS_PATH.stat().st_size > 0
+        corpus_ok = BUDDHISM_CORPUS_PATH.exists() and BUDDHISM_CORPUS_PATH.stat().st_size > 0
         if not corpus_ok:
             print("  ❌  Corpus still missing after download. Aborting.")
             sys.exit(1)
@@ -120,10 +134,10 @@ def check_and_build():
 
     # ── 5. Final check ──────────────────────────────────────
     all_present = all([
-        CORPUS_PATH.exists(),
-        CHUNKS_PATH.exists(),
-        EMBEDDINGS_PATH.exists(),
-        FAISS_PATH.exists(),
+        BUDDHISM_CORPUS_PATH.exists(),
+        BUDDHISM_CHUNKS_PATH.exists(),
+        BUDDHISM_EMBEDDINGS_PATH.exists(),
+        BUDDHISM_FAISS_PATH.exists(),
     ])
 
     if not all_present:
@@ -131,6 +145,7 @@ def check_and_build():
         sys.exit(1)
 
     # ── 6. Pre-load retrieve.py ─────────────────────────────
+    _ensure_buddhism_path()   # guaranteed before import
     print("\n  🔄  Pre-loading embedding model and FAISS index…")
     try:
         import retrieve  # noqa: F401
@@ -193,6 +208,7 @@ def root():
 
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
+    _ensure_buddhism_path()   # guaranteed before imports
     from rag_answer import answer_question
     from translator import translate_to_english, translate_from_english
 

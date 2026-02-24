@@ -8,11 +8,13 @@ from sentence_transformers import SentenceTransformer
 # Paths
 # ────────────────────────────────────────────────────────────────
 
-BASE_DIR        = Path(__file__).parent
-DATA_DIR        = BASE_DIR / "data"
+BASE_DIR                     = Path(__file__).parent
+BUDDHISM_DIR                 = BASE_DIR.parent / "multi-religion" / "buddhism"
+BUDDHISM_DATA_DIR            = BUDDHISM_DIR / "data"
 
-CHUNKS_PATH = DATA_DIR / "chunks.json"
-FAISS_PATH  = DATA_DIR / "faiss_index.bin"
+BUDDHISM_CHUNKS_PATH         = BUDDHISM_DATA_DIR / "chunks.json"
+BUDDHISM_EMBEDDINGS_PATH     = BUDDHISM_DATA_DIR / "embeddings.npy"
+BUDDHISM_FAISS_PATH          = BUDDHISM_DATA_DIR / "faiss_index.bin"
 
 # ────────────────────────────────────────────────────────────────
 # Settings
@@ -27,12 +29,12 @@ MODEL_NAME           = "all-MiniLM-L6-v2"
 # ────────────────────────────────────────────────────────────────
 
 print("Loading chunks...")
-with open(CHUNKS_PATH, "r", encoding="utf-8") as f:
+with open(BUDDHISM_CHUNKS_PATH, "r", encoding="utf-8") as f:
     chunks = json.load(f)
 print(f"  {len(chunks):,} chunks loaded")
 
 print("Loading FAISS index...")
-index = faiss.read_index(str(FAISS_PATH))
+index = faiss.read_index(str(BUDDHISM_FAISS_PATH))
 print(f"  {index.ntotal:,} vectors in index")
 
 print("Loading embedding model...")
