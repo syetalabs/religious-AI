@@ -11,3 +11,4 @@ sklearn
 python-dotenv
 deep_translator
 langdetect
+numpy
