@@ -4,7 +4,7 @@ import faiss
 from pathlib import Path
 
 # Optional: use smaller local embedding
-MODEL_NAME = "paraphrase-MiniLM-L3-v2"
+MODEL_NAME = "all-MiniLM-L6-v2"
 
 # Global placeholders
 index = None
