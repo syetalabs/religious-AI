@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import numpy as np
 import faiss
 from pathlib import Path
@@ -14,6 +15,7 @@ DATA_DIR        = BASE_DIR / "data"
 
 CORPUS_PATH     = DATA_DIR / "tipitaka_raw.json"
 CHUNKS_PATH     = DATA_DIR / "chunks.json"
+CHUNKS_DB_PATH  = DATA_DIR / "chunks.db"
 EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"
 FAISS_PATH      = DATA_DIR / "faiss_index.bin"
 
@@ -127,6 +129,8 @@ for item in tqdm(corpus, desc="Chunking"):
         })
 
 print(f"Total chunks created: {len(all_chunks):,}")
+
+# Save chunks.json (kept as a backup — not used at runtime)
 CHUNKS_PATH.write_text(
     json.dumps(all_chunks, indent=2, ensure_ascii=False),
     encoding="utf-8"
@@ -134,10 +138,61 @@ CHUNKS_PATH.write_text(
 print(f"Saved → {CHUNKS_PATH}")
 
 # ────────────────────────────────────────────────────────────────
+# SQLite — runtime chunk store
+# ────────────────────────────────────────────────────────────────
+# chunks.db replaces chunks.json at runtime.
+# Row id matches the FAISS vector index exactly (0, 1, 2, …)
+# so retrieve.py can do a direct lookup with no scanning.
+
+print("\nBuilding chunks.db ...")
+
+if CHUNKS_DB_PATH.exists():
+    CHUNKS_DB_PATH.unlink()   # always rebuild fresh alongside new embeddings
+
+con = sqlite3.connect(str(CHUNKS_DB_PATH))
+con.executescript("""
+    CREATE TABLE chunks (
+        id       INTEGER PRIMARY KEY,
+        text     TEXT    NOT NULL,
+        book     TEXT    NOT NULL DEFAULT '',
+        pitaka   TEXT    NOT NULL DEFAULT '',
+        source   TEXT    NOT NULL DEFAULT '',
+        religion TEXT    NOT NULL DEFAULT 'Buddhism',
+        language TEXT    NOT NULL DEFAULT 'en'
+    );
+
+    -- Covers the religion + language filter used in every search query
+    CREATE INDEX idx_religion_language ON chunks (religion, language);
+""")
+
+con.executemany(
+    "INSERT INTO chunks (id, text, book, pitaka, source, religion, language) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+        (
+            i,
+            c["text"],
+            c.get("book",     ""),
+            c.get("pitaka",   ""),
+            c.get("source",   ""),
+            c.get("religion", "Buddhism"),
+            c.get("language", "en"),
+        )
+        for i, c in enumerate(all_chunks)
+    ],
+)
+
+con.commit()
+con.close()
+
+db_mb = CHUNKS_DB_PATH.stat().st_size / 1_048_576
+print(f"chunks.db saved → {CHUNKS_DB_PATH}  ({db_mb:.1f} MB)")
+
+# ────────────────────────────────────────────────────────────────
 # Embeddings
 # ────────────────────────────────────────────────────────────────
 
-print("Loading embedding model...")
+print("\nLoading embedding model...")
 model = SentenceTransformer(MODEL_NAME)
 
 print("Creating embeddings...")
@@ -159,7 +214,7 @@ print(f"Embedding shape : {embeddings.shape}")
 # Build FAISS index
 # ────────────────────────────────────────────────────────────────
 
-print("Building FAISS index...")
+print("\nBuilding FAISS index...")
 
 dimension = embeddings.shape[1]
 
@@ -171,4 +226,19 @@ index.add(embeddings)
 
 faiss.write_index(index, str(FAISS_PATH))
 print(f"FAISS index saved → {FAISS_PATH}  ({index.ntotal:,} vectors)")
-print("Done.")
+
+# ────────────────────────────────────────────────────────────────
+# Summary
+# ────────────────────────────────────────────────────────────────
+
+print("\n" + "─" * 50)
+print("Done. Files produced:")
+for path, note in [
+    (CHUNKS_DB_PATH,  "← upload to Hugging Face  (runtime)"),
+    (FAISS_PATH,      "← upload to Hugging Face  (runtime)"),
+    (EMBEDDINGS_PATH, "← keep locally as backup  (not needed at runtime)"),
+    (CHUNKS_PATH,     "← keep locally as backup  (not needed at runtime)"),
+]:
+    mb = path.stat().st_size / 1_048_576
+    print(f"  {path.name:<22} {mb:>7.1f} MB   {note}")
+print("─" * 50)
