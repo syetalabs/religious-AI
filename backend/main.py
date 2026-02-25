@@ -104,7 +104,7 @@ def check_and_build():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("App starting...")
+    check_and_build()
     yield
     print("\nAPI shutting down gracefully.")
 
