@@ -8,12 +8,11 @@ from sentence_transformers import SentenceTransformer
 # Paths
 # ────────────────────────────────────────────────────────────────
 
-BASE_DIR          = Path(__file__).parent
-BUDDHISM_DIR      = BASE_DIR.parent / "multi-religion" / "buddhism"
-BUDDHISM_DATA_DIR = BUDDHISM_DIR / "data"
+from data_fetcher import ensure_data_files
 
-CHUNKS_DB_PATH    = BUDDHISM_DATA_DIR / "chunks.db"
-FAISS_PATH        = BUDDHISM_DATA_DIR / "faiss_index.bin"
+DATA_DIR         = ensure_data_files()
+CHUNKS_DB_PATH   = DATA_DIR / "chunks.db"
+FAISS_PATH       = DATA_DIR / "faiss_index.bin"
 
 # ────────────────────────────────────────────────────────────────
 # Settings
