@@ -20,7 +20,7 @@ FAISS_PATH       = DATA_DIR / "faiss_index.bin"
 
 TOP_K                = 10
 SIMILARITY_THRESHOLD = 0.45
-MODEL_NAME           = "all-MiniLM-L6-v2"
+MODEL_NAME           = "paraphrase-MiniLM-L3-v2"
 
 # ────────────────────────────────────────────────────────────────
 # Load FAISS index into RAM  
