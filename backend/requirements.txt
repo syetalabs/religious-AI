@@ -7,7 +7,7 @@ sentence-transformers
 faiss-cpu
 transformers
 torch
-sklearn
+scikit-learn
 python-dotenv
 deep_translator
 langdetect
