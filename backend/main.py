@@ -139,84 +139,42 @@ def check_and_build():
     # ── 1. Directories ──────────────────────────────────────
     BUDDHISM_DATA_DIR.mkdir(parents=True, exist_ok=True)
     BUDDHISM_SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
+
     print(f"  ✅  data/     : {BUDDHISM_DATA_DIR.relative_to(BUDDHISM_DIR)}")
     print(f"  ✅  sections/ : {BUDDHISM_SECTIONS_DIR.relative_to(BUDDHISM_DIR)}")
 
-    # ── 2. Raw corpus ───────────────────────────────────────
-    corpus_ok = BUDDHISM_CORPUS_PATH.exists() and BUDDHISM_CORPUS_PATH.stat().st_size > 0
-    if corpus_ok:
-        size_mb = BUDDHISM_CORPUS_PATH.stat().st_size / 1_048_576
-        print(f"  ✅  tipitaka_raw.json  ({size_mb:.1f} MB)")
-    else:
-        print(f"  ❌  tipitaka_raw.json  — not found or empty")
+    # ── 2. Runtime files ONLY ───────────────────────────────
+    db_ok = (
+        BUDDHISM_CHUNKS_DB_PATH.exists()
+        and BUDDHISM_CHUNKS_DB_PATH.stat().st_size > 0
+    )
 
-    # ── 3. Runtime artefacts ────────────────────────────────
-    #
-    #   Runtime needs:   chunks.db  +  faiss_index.bin
-    #   Build produces:  chunks.json + embeddings.npy + faiss_index.bin
-    #   convert_to_sqlite.py turns chunks.json → chunks.db
-    #
-    db_ok         = BUDDHISM_CHUNKS_DB_PATH.exists()   and BUDDHISM_CHUNKS_DB_PATH.stat().st_size > 0
-    json_ok       = BUDDHISM_CHUNKS_JSON_PATH.exists() and BUDDHISM_CHUNKS_JSON_PATH.stat().st_size > 0
-    embeddings_ok = BUDDHISM_EMBEDDINGS_PATH.exists()  and BUDDHISM_EMBEDDINGS_PATH.stat().st_size > 0
-    faiss_ok      = BUDDHISM_FAISS_PATH.exists()       and BUDDHISM_FAISS_PATH.stat().st_size > 0
+    faiss_ok = (
+        BUDDHISM_FAISS_PATH.exists()
+        and BUDDHISM_FAISS_PATH.stat().st_size > 0
+    )
 
-    for label, ok in [
-        ("chunks.db       (runtime)", db_ok),
-        ("chunks.json     (build)",   json_ok),
-        ("embeddings.npy  (build)",   embeddings_ok),
-        ("faiss_index.bin (runtime)", faiss_ok),
-    ]:
-        print(f"  {'✅' if ok else '❌'}  {label}")
+    print(f"  {'✅' if db_ok else '❌'}  chunks.db (runtime)")
+    print(f"  {'✅' if faiss_ok else '❌'}  faiss_index.bin (runtime)")
 
-    # ── 4. Build missing steps ──────────────────────────────
-
-    # 4a. If corpus missing → download it
-    if not corpus_ok:
-        print("\n  ⚠️   Raw corpus missing — running data_loader…")
-        _run_data_loader()
-        corpus_ok = BUDDHISM_CORPUS_PATH.exists() and BUDDHISM_CORPUS_PATH.stat().st_size > 0
-        if not corpus_ok:
-            print("  ❌  Corpus still missing after download. Aborting.")
-            sys.exit(1)
-
-    # 4b. If FAISS / chunks.json missing → run chunk_and_embed
-    if not (json_ok and embeddings_ok and faiss_ok):
-        print("\n  ⚠️   Build artefacts missing — running chunk_and_embed…")
-        _run_chunk_and_embed()
-        json_ok = BUDDHISM_CHUNKS_JSON_PATH.exists() and BUDDHISM_CHUNKS_JSON_PATH.stat().st_size > 0
-
-    # 4c. If chunks.db missing but chunks.json exists → convert
-    if not db_ok:
-        if json_ok:
-            _run_convert_to_sqlite()
-        else:
-            print("  ❌  Neither chunks.db nor chunks.json found. Cannot continue.")
-            sys.exit(1)
-
-    # ── 5. Final check — only runtime files required ────────
-    all_present = all([
-        BUDDHISM_CHUNKS_DB_PATH.exists(),
-        BUDDHISM_FAISS_PATH.exists(),
-    ])
-
-    if not all_present:
-        print("\n  ❌  Required runtime files still missing. Aborting.")
+    if not (db_ok and faiss_ok):
+        print("\n  ❌  Required runtime files missing.")
+        print("      Make sure chunks.db and faiss_index.bin are committed to GitHub.")
         sys.exit(1)
 
-    # ── 6. Pre-load retrieve.py ─────────────────────────────
+    # ── 3. Pre-load retrieve.py ─────────────────────────────
     _ensure_buddhism_path()
     print("\n  🔄  Pre-loading embedding model and FAISS index…")
+
     try:
-        import retrieve  # noqa: F401
+        import retrieve  # noqa
         print("  ✅  Model and index loaded into memory.")
     except Exception as exc:
         print(f"  ❌  Failed to pre-load retrieve.py: {exc}")
         sys.exit(1)
 
-    print(f"\n  All checks passed. Starting chatbot... 🪷")
+    print("\n  All runtime checks passed. Starting chatbot... 🪷")
     print("═" * 55 + "\n")
-
 
 # ═══════════════════════════════════════════════════════════
 # FastAPI lifespan
