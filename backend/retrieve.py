@@ -1,4 +1,4 @@
-import json
+import sqlite3
 import numpy as np
 import faiss
 from pathlib import Path
@@ -8,13 +8,12 @@ from sentence_transformers import SentenceTransformer
 # Paths
 # ────────────────────────────────────────────────────────────────
 
-BASE_DIR                     = Path(__file__).parent
-BUDDHISM_DIR                 = BASE_DIR.parent / "multi-religion" / "buddhism"
-BUDDHISM_DATA_DIR            = BUDDHISM_DIR / "data"
+BASE_DIR          = Path(__file__).parent
+BUDDHISM_DIR      = BASE_DIR.parent / "multi-religion" / "buddhism"
+BUDDHISM_DATA_DIR = BUDDHISM_DIR / "data"
 
-BUDDHISM_CHUNKS_PATH         = BUDDHISM_DATA_DIR / "chunks.json"
-BUDDHISM_EMBEDDINGS_PATH     = BUDDHISM_DATA_DIR / "embeddings.npy"
-BUDDHISM_FAISS_PATH          = BUDDHISM_DATA_DIR / "faiss_index.bin"
+CHUNKS_DB_PATH    = BUDDHISM_DATA_DIR / "chunks.db"
+FAISS_PATH        = BUDDHISM_DATA_DIR / "faiss_index.bin"
 
 # ────────────────────────────────────────────────────────────────
 # Settings
@@ -25,34 +24,57 @@ SIMILARITY_THRESHOLD = 0.45
 MODEL_NAME           = "all-MiniLM-L6-v2"
 
 # ────────────────────────────────────────────────────────────────
-# Load assets at module import (cached for all queries)
+# Load FAISS index into RAM  
 # ────────────────────────────────────────────────────────────────
 
-print("Loading chunks...")
-with open(BUDDHISM_CHUNKS_PATH, "r", encoding="utf-8") as f:
-    chunks = json.load(f)
-print(f"  {len(chunks):,} chunks loaded")
-
 print("Loading FAISS index...")
-index = faiss.read_index(str(BUDDHISM_FAISS_PATH))
+index = faiss.read_index(str(FAISS_PATH))
 print(f"  {index.ntotal:,} vectors in index")
+
+# ────────────────────────────────────────────────────────────────
+# Load embedding model into RAM  
+# ────────────────────────────────────────────────────────────────
 
 print("Loading embedding model...")
 model = SentenceTransformer(MODEL_NAME)
 print("  Ready")
 
 # ────────────────────────────────────────────────────────────────
-# Build per-religion chunk ID lists for fast filtered search
+# Build per-religion ID filter from SQLite  
+#
+# Only loads chunk IDs and religion/language fields — NOT the text.
+# chunk text is fetched on demand per query (see _fetch_chunks).
 # ────────────────────────────────────────────────────────────────
-# Pre-computing these at load time means search() never has to
-# iterate all chunks — it only scores the relevant religion's IDs.
+
+print("Building religion index from SQLite...")
+_con = sqlite3.connect(str(CHUNKS_DB_PATH), check_same_thread=False)
+_con.row_factory = sqlite3.Row
 
 _religion_ids: dict[str, list[int]] = {}
-for i, chunk in enumerate(chunks):
-    rel = chunk.get("religion", "unknown")
-    _religion_ids.setdefault(rel, []).append(i)
+for row in _con.execute("SELECT id, religion FROM chunks"):
+    _religion_ids.setdefault(row["religion"], []).append(row["id"])
 
 print(f"  Religions indexed: {list(_religion_ids.keys())}")
+
+# ────────────────────────────────────────────────────────────────
+# Chunk fetcher — reads only the matched rows from SQLite
+# ────────────────────────────────────────────────────────────────
+
+def _fetch_chunks(ids: list[int]) -> dict[int, sqlite3.Row]:
+    """
+    Fetch full chunk rows for a list of FAISS result IDs.
+    Uses a single SQL query with an IN clause — typically < 1 ms.
+    Returns a dict keyed by chunk id for O(1) lookup.
+    """
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = _con.execute(
+        f"SELECT id, text, book, pitaka, source, religion, language "
+        f"FROM chunks WHERE id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    return {row["id"]: row for row in rows}
 
 # ────────────────────────────────────────────────────────────────
 # Search
@@ -71,44 +93,60 @@ def search(
     Filtering order (matches development research spec):
       1. Religion namespace  — prevents cross-religion contamination
       2. Language            — returns only chunks in the requested language
-      3. Similarity threshold — confidence gate (section 6 of the research doc)
+      3. Similarity threshold — confidence gate
 
     Returns a list of dicts with keys:
       text, book, pitaka, source, religion, language, score
     """
 
-    # 1. Embed and L2-normalise the query (must match how index was built)
+    # 1. Embed and L2-normalise the query
     query_vec = model.encode([query], convert_to_numpy=True)
     faiss.normalize_L2(query_vec)
 
-    # 2. FAISS search — retrieve more than top_k so we have room to filter
-    fetch_k   = min(top_k * 10, index.ntotal)
+    # 2. FAISS search — fetch more than top_k to allow for filtering
+    fetch_k = min(top_k * 10, index.ntotal)
     scores, indices = index.search(query_vec, fetch_k)
-    scores    = scores[0]
-    indices   = indices[0]
+    scores  = scores[0]
+    indices = indices[0]
 
-    # 3. Filter by religion + language + threshold
+    # 3. Pre-filter: keep only IDs belonging to the requested religion
     allowed_ids = set(_religion_ids.get(religion, []))
 
+    candidate_ids = [
+        int(idx) for score, idx in zip(scores, indices)
+        if idx != -1
+        and int(idx) in allowed_ids
+        and float(score) >= threshold
+    ]
+
+    if not candidate_ids:
+        return []
+
+    # 4. Fetch chunk rows from SQLite in one query
+    chunk_map = _fetch_chunks(candidate_ids)
+
+    # 5. Build results preserving FAISS score order
+    score_map = {
+        int(idx): float(score)
+        for score, idx in zip(scores, indices)
+        if idx != -1
+    }
+
     results = []
-    for score, idx in zip(scores, indices):
-        if idx == -1:                           # FAISS padding
+    for idx in candidate_ids:
+        chunk = chunk_map.get(idx)
+        if chunk is None:
             continue
-        if idx not in allowed_ids:              # wrong religion
-            continue
-        chunk = chunks[idx]
-        if chunk.get("language", "en") != language:  # wrong language
-            continue
-        if float(score) < threshold:            # below confidence gate
+        if chunk["language"] != language:
             continue
         results.append({
             "text":     chunk["text"],
             "book":     chunk["book"],
-            "pitaka":   chunk.get("pitaka", ""),
+            "pitaka":   chunk["pitaka"],
             "source":   chunk["source"],
             "religion": chunk["religion"],
-            "language": chunk.get("language", "en"),
-            "score":    float(score),
+            "language": chunk["language"],
+            "score":    score_map[idx],
         })
         if len(results) >= top_k:
             break

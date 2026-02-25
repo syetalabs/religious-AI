@@ -18,21 +18,17 @@ BUDDHISM_SECTIONS_DIR        = BUDDHISM_DATA_DIR / "sections"
 BUDDHISM_CHECKPOINT_PATH     = BUDDHISM_DATA_DIR / "checkpoint.json"
 
 BUDDHISM_CORPUS_PATH         = BUDDHISM_DATA_DIR / "tipitaka_raw.json"
-BUDDHISM_CHUNKS_PATH         = BUDDHISM_DATA_DIR / "chunks.json"
+BUDDHISM_CHUNKS_DB_PATH      = BUDDHISM_DATA_DIR / "chunks.db"       # ← SQLite (runtime)
+BUDDHISM_CHUNKS_JSON_PATH    = BUDDHISM_DATA_DIR / "chunks.json"     # ← JSON (build-time only)
 BUDDHISM_EMBEDDINGS_PATH     = BUDDHISM_DATA_DIR / "embeddings.npy"
 BUDDHISM_FAISS_PATH          = BUDDHISM_DATA_DIR / "faiss_index.bin"
 
-# ── Inject path early and unconditionally ──────────────────
-# Done twice: once at module level, once as a guaranteed
-# runtime guard inside each helper — uvicorn's reloader
-# spawns child processes where module-level inserts may not
-# propagate reliably.
 def _ensure_buddhism_path():
     buddhism_str = str(BUDDHISM_DIR)
     if buddhism_str not in sys.path:
         sys.path.insert(0, buddhism_str)
 
-_ensure_buddhism_path()   # module-level call
+_ensure_buddhism_path()
 
 # ═══════════════════════════════════════════════════════════
 # Startup helpers
@@ -60,7 +56,7 @@ def _check_env_vars():
 
 
 def _run_data_loader():
-    _ensure_buddhism_path()   # guaranteed before import
+    _ensure_buddhism_path()
     print("\n  📥  Running data_loader.download_tipitaka()…")
     try:
         from data_loader import download_tipitaka
@@ -72,7 +68,7 @@ def _run_data_loader():
 
 
 def _run_chunk_and_embed():
-    _ensure_buddhism_path()   # guaranteed before runpy
+    _ensure_buddhism_path()
     print("\n  🔢  Running chunk_and_embed pipeline…")
     try:
         import runpy
@@ -80,6 +76,53 @@ def _run_chunk_and_embed():
         print("  ✅  chunks.json, embeddings.npy, faiss_index.bin created.")
     except Exception as exc:
         print(f"  ❌  chunk_and_embed failed: {exc}")
+        sys.exit(1)
+
+
+def _run_convert_to_sqlite():
+    """Convert chunks.json → chunks.db if chunks.db is missing."""
+    print("\n  🗄️   Converting chunks.json → chunks.db …")
+    try:
+        import json, sqlite3
+        with open(BUDDHISM_CHUNKS_JSON_PATH, "r", encoding="utf-8") as f:
+            chunks = json.load(f)
+
+        con = sqlite3.connect(str(BUDDHISM_CHUNKS_DB_PATH))
+        con.executescript("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id       INTEGER PRIMARY KEY,
+                text     TEXT    NOT NULL,
+                book     TEXT    NOT NULL,
+                pitaka   TEXT    NOT NULL DEFAULT '',
+                source   TEXT    NOT NULL DEFAULT '',
+                religion TEXT    NOT NULL DEFAULT 'Buddhism',
+                language TEXT    NOT NULL DEFAULT 'en'
+            );
+            CREATE INDEX IF NOT EXISTS idx_religion_language
+                ON chunks (religion, language);
+        """)
+        con.executemany(
+            "INSERT OR IGNORE INTO chunks "
+            "(id, text, book, pitaka, source, religion, language) VALUES (?,?,?,?,?,?,?)",
+            [
+                (
+                    i,
+                    c["text"],
+                    c.get("book",     ""),
+                    c.get("pitaka",   ""),
+                    c.get("source",   ""),
+                    c.get("religion", "Buddhism"),
+                    c.get("language", "en"),
+                )
+                for i, c in enumerate(chunks)
+            ],
+        )
+        con.commit()
+        con.close()
+        size_mb = BUDDHISM_CHUNKS_DB_PATH.stat().st_size / 1_048_576
+        print(f"  ✅  chunks.db created ({size_mb:.1f} MB)")
+    except Exception as exc:
+        print(f"  ❌  SQLite conversion failed: {exc}")
         sys.exit(1)
 
 
@@ -107,19 +150,28 @@ def check_and_build():
     else:
         print(f"  ❌  tipitaka_raw.json  — not found or empty")
 
-    # ── 3. Embedding artefacts ──────────────────────────────
-    chunks_ok     = BUDDHISM_CHUNKS_PATH.exists()     and BUDDHISM_CHUNKS_PATH.stat().st_size > 0
-    embeddings_ok = BUDDHISM_EMBEDDINGS_PATH.exists() and BUDDHISM_EMBEDDINGS_PATH.stat().st_size > 0
-    faiss_ok      = BUDDHISM_FAISS_PATH.exists()      and BUDDHISM_FAISS_PATH.stat().st_size > 0
+    # ── 3. Runtime artefacts ────────────────────────────────
+    #
+    #   Runtime needs:   chunks.db  +  faiss_index.bin
+    #   Build produces:  chunks.json + embeddings.npy + faiss_index.bin
+    #   convert_to_sqlite.py turns chunks.json → chunks.db
+    #
+    db_ok         = BUDDHISM_CHUNKS_DB_PATH.exists()   and BUDDHISM_CHUNKS_DB_PATH.stat().st_size > 0
+    json_ok       = BUDDHISM_CHUNKS_JSON_PATH.exists() and BUDDHISM_CHUNKS_JSON_PATH.stat().st_size > 0
+    embeddings_ok = BUDDHISM_EMBEDDINGS_PATH.exists()  and BUDDHISM_EMBEDDINGS_PATH.stat().st_size > 0
+    faiss_ok      = BUDDHISM_FAISS_PATH.exists()       and BUDDHISM_FAISS_PATH.stat().st_size > 0
 
     for label, ok in [
-        ("chunks.json",     chunks_ok),
-        ("embeddings.npy",  embeddings_ok),
-        ("faiss_index.bin", faiss_ok),
+        ("chunks.db       (runtime)", db_ok),
+        ("chunks.json     (build)",   json_ok),
+        ("embeddings.npy  (build)",   embeddings_ok),
+        ("faiss_index.bin (runtime)", faiss_ok),
     ]:
         print(f"  {'✅' if ok else '❌'}  {label}")
 
     # ── 4. Build missing steps ──────────────────────────────
+
+    # 4a. If corpus missing → download it
     if not corpus_ok:
         print("\n  ⚠️   Raw corpus missing — running data_loader…")
         _run_data_loader()
@@ -128,24 +180,32 @@ def check_and_build():
             print("  ❌  Corpus still missing after download. Aborting.")
             sys.exit(1)
 
-    if not (chunks_ok and embeddings_ok and faiss_ok):
-        print("\n  ⚠️   Embedding artefacts missing — running chunk_and_embed…")
+    # 4b. If FAISS / chunks.json missing → run chunk_and_embed
+    if not (json_ok and embeddings_ok and faiss_ok):
+        print("\n  ⚠️   Build artefacts missing — running chunk_and_embed…")
         _run_chunk_and_embed()
+        json_ok = BUDDHISM_CHUNKS_JSON_PATH.exists() and BUDDHISM_CHUNKS_JSON_PATH.stat().st_size > 0
 
-    # ── 5. Final check ──────────────────────────────────────
+    # 4c. If chunks.db missing but chunks.json exists → convert
+    if not db_ok:
+        if json_ok:
+            _run_convert_to_sqlite()
+        else:
+            print("  ❌  Neither chunks.db nor chunks.json found. Cannot continue.")
+            sys.exit(1)
+
+    # ── 5. Final check — only runtime files required ────────
     all_present = all([
-        BUDDHISM_CORPUS_PATH.exists(),
-        BUDDHISM_CHUNKS_PATH.exists(),
-        BUDDHISM_EMBEDDINGS_PATH.exists(),
+        BUDDHISM_CHUNKS_DB_PATH.exists(),
         BUDDHISM_FAISS_PATH.exists(),
     ])
 
     if not all_present:
-        print("\n  ❌  One or more required files are still missing. Aborting.")
+        print("\n  ❌  Required runtime files still missing. Aborting.")
         sys.exit(1)
 
     # ── 6. Pre-load retrieve.py ─────────────────────────────
-    _ensure_buddhism_path()   # guaranteed before import
+    _ensure_buddhism_path()
     print("\n  🔄  Pre-loading embedding model and FAISS index…")
     try:
         import retrieve  # noqa: F401
@@ -195,7 +255,8 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     religion: str = "Buddhism"
-    language: str = "English"   # "English" | "Sinhala" | "Tamil"
+    language: str = "English"
+
 
 # ═══════════════════════════════════════════════════════════
 # Routes
@@ -208,21 +269,18 @@ def root():
 
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
-    _ensure_buddhism_path()   # guaranteed before imports
+    _ensure_buddhism_path()
     from rag_answer import answer_question
     from translator import translate_to_english, translate_from_english
 
-    # Step 1 — translate question to English for the RAG pipeline
     english_question = translate_to_english(request.question, request.language)
 
-    # Step 2 — run through RAG (always in English)
     result = answer_question(
         question=english_question,
         religion=request.religion,
         language="en",
     )
 
-    # Step 3 — translate the answer back to the user's language
     translated_answer = translate_from_english(result["answer"], request.language)
 
     return {
