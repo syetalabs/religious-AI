@@ -26,17 +26,20 @@ MODEL_NAME           = "all-MiniLM-L6-v2"
 # Load FAISS index into RAM  
 # ────────────────────────────────────────────────────────────────
 
-print("Loading FAISS index...")
-index = faiss.read_index(str(FAISS_PATH))
-print(f"  {index.ntotal:,} vectors in index")
+index = None
+model = None
 
-# ────────────────────────────────────────────────────────────────
-# Load embedding model into RAM  
-# ────────────────────────────────────────────────────────────────
+def _lazy_load():
+    global index, model
+    if index is None:
+        print("Loading FAISS index...")
+        index = faiss.read_index(str(FAISS_PATH))
+        print(f"{index.ntotal:,} vectors loaded")
 
-print("Loading embedding model...")
-model = SentenceTransformer(MODEL_NAME)
-print("  Ready")
+    if model is None:
+        print("Loading embedding model...")
+        model = SentenceTransformer(MODEL_NAME)
+        print("Model ready")
 
 # ────────────────────────────────────────────────────────────────
 # Build per-religion ID filter from SQLite  
@@ -97,7 +100,7 @@ def search(
     Returns a list of dicts with keys:
       text, book, pitaka, source, religion, language, score
     """
-
+    _lazy_load()
     # 1. Embed and L2-normalise the query
     query_vec = model.encode([query], convert_to_numpy=True)
     faiss.normalize_L2(query_vec)
