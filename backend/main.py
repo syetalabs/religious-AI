@@ -7,17 +7,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ═══════════════════════════════════════════════════════════
-# Background loader
-#
-# Render's port scanner requires the port to be open within
-# ~5 minutes of startup. Heavy work (HF download + model
-# load) can take longer, so we do it in a background thread
-# AFTER the port is already bound and accepting requests.
-# ═══════════════════════════════════════════════════════════
+from data_fetcher import ensure_data_files
+from retrieve import _lazy_load
 
-_ready = False          # True once data + model are loaded
-_load_error = None      # Stores any exception from background load
+_ready = False
+_load_error = None
 
 def _background_load():
     global _ready, _load_error
@@ -119,10 +113,10 @@ def ask_question(request: QuestionRequest):
 
     from retrieve import _lazy_load
     from rag_answer import answer_question
-    _lazy_load()  # no-op after background load; safety net only
+    _lazy_load()
 
     try:
-        from translator import translate_to_english, translate_from_english
+        from translator import translate_to_english, translate_from_english_dual
         english_question = translate_to_english(request.question, request.language)
         use_translation = True
     except ImportError:
@@ -135,15 +129,20 @@ def ask_question(request: QuestionRequest):
         language="en",
     )
 
-    translated_answer = result["answer"]
+    # Return both English and translated answer
     if use_translation:
         try:
-            translated_answer = translate_from_english(result["answer"], request.language)
+            from translator import translate_from_english_dual
+            dual = translate_from_english_dual(result["answer"], request.language)
         except Exception:
-            translated_answer = result["answer"]
+            dual = {"english": result["answer"], "translated": result["answer"], "is_english": True}
+    else:
+        dual = {"english": result["answer"], "translated": result["answer"], "is_english": True}
 
     return {
-        "answer":             translated_answer,
+        "answer":             dual["translated"],   # primary answer in user's language
+        "answer_english":     dual["english"],      # always English version
+        "is_english":         dual["is_english"],   # True if user selected English
         "sources":            result.get("sources", []),
         "scores":             result.get("scores", []),
         "confidence_warning": result.get("low_confidence", False),

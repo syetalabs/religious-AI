@@ -90,7 +90,42 @@ const ConfidenceWarning = ({ palette }) => (
   </div>
 );
 
-// ─── Error Toast ──────────────────────────────────────────
+// ─── English Translation Box ──────────────────────────────
+const EnglishTranslation = ({ text, palette }) => {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div style={{
+      marginTop: 8, borderRadius: 8,
+      border: `1px dashed ${palette.sidebarBorder}`,
+      overflow: "hidden"
+    }}>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        style={{
+          width: "100%", padding: "5px 10px",
+          background: palette.hover, border: "none",
+          cursor: "pointer", display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          fontFamily: "'Cinzel', serif", fontSize: 10.5,
+          color: palette.accentDark, letterSpacing: 0.5
+        }}>
+        <span>🇬🇧 English translation</span>
+        <span style={{ fontSize: 10 }}>{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded && (
+        <div style={{
+          padding: "8px 12px", fontSize: 12.5,
+          color: palette.textMuted, lineHeight: 1.6,
+          background: palette.inputBg,
+          fontStyle: "italic"
+        }}>
+          {text}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ErrorToast = ({ message, onClose }) => (
   <div style={{
     position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)",
@@ -134,8 +169,7 @@ export default function ReligiousChatbot() {
     if (!input.trim() || isTyping) return;
 
     const userText = input.trim();
-    const userMsg = { id: Date.now(), role: "user", text: userText };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, { id: Date.now(), role: "user", text: userText }]);
     setInput("");
     setIsTyping(true);
     setError(null);
@@ -144,10 +178,7 @@ export default function ReligiousChatbot() {
       const response = await fetch(`${API_BASE}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: userText,
-          language: language,
-        }),
+        body: JSON.stringify({ question: userText, language }),
       });
 
       if (!response.ok) {
@@ -160,7 +191,10 @@ export default function ReligiousChatbot() {
       setMessages(prev => [...prev, {
         id: Date.now() + 1,
         role: "bot",
-        text: data.answer,
+        text: data.answer,                   // translated answer
+        textEnglish: data.is_english         // if English selected, no secondary box needed
+          ? null
+          : data.answer_english,
         sources: data.sources,
         warning: data.confidence_warning,
       }]);
@@ -248,12 +282,12 @@ export default function ReligiousChatbot() {
           </div>
           <button className="sidebar-btn" onClick={handleNewChat}
             style={{
-              width: "100%", padding: "10px 14px", borderRadius: 10,
-              border: `1.5px solid ${palette.accent}`, background: "transparent",
-              color: palette.accentDark, fontFamily: "'Lora', serif", fontSize: 13,
-              cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
-              marginBottom: 8, transition: "background 0.2s"
-            }}>
+            width: "100%", padding: "10px 14px", borderRadius: 10,
+            border: `1.5px solid ${palette.accent}`, background: "transparent",
+            color: palette.accentDark, fontFamily: "'Lora', serif", fontSize: 13,
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+            marginBottom: 8, transition: "background 0.2s"
+          }}>
             <span style={{ fontSize: 16 }}>✦</span> New Chat
           </button>
           <div style={{ marginTop: 14 }}>
@@ -264,11 +298,11 @@ export default function ReligiousChatbot() {
               <div key={chat.id} className="recent-item"
                 onClick={() => setActiveChat(chat.id)}
                 style={{
-                  padding: "8px 10px", borderRadius: 8, cursor: "pointer",
-                  background: activeChat === chat.id ? palette.hover : "transparent",
-                  marginBottom: 2, transition: "background 0.15s",
-                  borderLeft: activeChat === chat.id ? `3px solid ${palette.accent}` : "3px solid transparent"
-                }}>
+                padding: "8px 10px", borderRadius: 8, cursor: "pointer",
+                background: activeChat === chat.id ? palette.hover : "transparent",
+                marginBottom: 2, transition: "background 0.15s",
+                borderLeft: activeChat === chat.id ? `3px solid ${palette.accent}` : "3px solid transparent"
+              }}>
                 <div style={{ fontSize: 12.5, color: palette.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{chat.title}</div>
                 <div style={{ fontSize: 10, color: palette.textMuted, marginTop: 2 }}>{chat.time}</div>
               </div>
@@ -309,11 +343,11 @@ export default function ReligiousChatbot() {
         }}>
           <button onClick={() => setSidebarOpen(o => !o)}
             style={{
-              width: 36, height: 36, border: `1px solid ${palette.sidebarBorder}`,
-              borderRadius: 8, background: "transparent", cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              color: palette.textMuted, fontSize: 16, transition: "background 0.15s"
-            }} className="icon-btn">
+            width: 36, height: 36, border: `1px solid ${palette.sidebarBorder}`,
+            borderRadius: 8, background: "transparent", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: palette.textMuted, fontSize: 16, transition: "background 0.15s"
+          }} className="icon-btn">
             {sidebarOpen ? "◁" : "▷"}
           </button>
           <BotAvatar size={34} />
@@ -321,13 +355,13 @@ export default function ReligiousChatbot() {
           <div style={{ position: "relative" }}>
             <button onClick={() => setShowLangDropdown(d => !d)}
               style={{
-                padding: "7px 14px", border: `1.5px solid ${palette.accent}`,
-                borderRadius: 20, background: "transparent",
-                fontFamily: "'Lora', serif", fontSize: 12.5,
-                color: palette.accentDark, cursor: "pointer",
+              padding: "7px 14px", border: `1.5px solid ${palette.accent}`,
+              borderRadius: 20, background: "transparent",
+              fontFamily: "'Lora', serif", fontSize: 12.5,
+              color: palette.accentDark, cursor: "pointer",
                 display: "flex", alignItems: "center", gap: 6,
                 transition: "background 0.15s"
-              }} className="icon-btn">
+            }} className="icon-btn">
               🌐 {language} <span style={{ fontSize: 10 }}>▾</span>
             </button>
             {showLangDropdown && (
@@ -385,10 +419,10 @@ export default function ReligiousChatbot() {
             {messages.map((msg) => (
               <div key={msg.id} className="msg-anim"
                 style={{
-                  display: "flex",
-                  flexDirection: msg.role === "user" ? "row-reverse" : "row",
-                  alignItems: "flex-end", gap: 10
-                }}>
+                display: "flex",
+                flexDirection: msg.role === "user" ? "row-reverse" : "row",
+                alignItems: "flex-end", gap: 10
+              }}>
                 {msg.role === "bot" ? <BotAvatar size={30} /> : <UserAvatar name="U" size={30} />}
                 <div style={{ maxWidth: "58%", display: "flex", flexDirection: "column" }}>
                   <div style={{
@@ -404,6 +438,12 @@ export default function ReligiousChatbot() {
                   }}>
                     {msg.text}
                   </div>
+
+                  {/* English translation box — only shown for Sinhala/Tamil */}
+                  {msg.role === "bot" && msg.textEnglish && (
+                    <EnglishTranslation text={msg.textEnglish} palette={palette} />
+                  )}
+
                   {msg.role === "bot" && <SourcePills sources={msg.sources} palette={palette} />}
                   {msg.role === "bot" && msg.warning && <ConfidenceWarning palette={palette} />}
                 </div>

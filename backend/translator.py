@@ -71,4 +71,18 @@ def translate_from_english(text: str, target_language: str) -> str:
 
     except Exception as exc:
         print(f"  [translator] from-English failed: {exc}")
-        return text  # Fall back to English answer
+        return text
+
+
+def translate_from_english_dual(text: str, target_language: str) -> dict:
+    """
+    Returns both the English original and the translated version.
+    If target is English, translated is the same as english.
+    Used so the frontend can display both side by side.
+    """
+    translated = translate_from_english(text, target_language)
+    return {
+        "english":    text,
+        "translated": translated,
+        "is_english": LANGUAGE_CODES.get(target_language, "en") == "en",
+    }
