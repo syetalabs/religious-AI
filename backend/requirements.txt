@@ -3,13 +3,12 @@ beautifulsoup4
 tqdm
 fastapi
 uvicorn
-sentence-transformers
 faiss-cpu
 transformers
-torch
 scikit-learn
 python-dotenv
 deep_translator
 langdetect
 numpy
 huggingface_hub
+fastembed

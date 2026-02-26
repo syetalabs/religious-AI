@@ -1,17 +1,18 @@
 import os
 import sqlite3
 import threading
+import numpy as np
 import faiss
 from pathlib import Path
 
-MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Global state
-index = None
-model = None
-_con = None
+index        = None
+model        = None
+_con         = None
 _religion_ids = {}
-_load_lock = threading.Lock()   # prevents race on concurrent first requests
+_load_lock   = threading.Lock()   # prevents race on concurrent first requests
 
 # ────────────────────────────────────────────────────────────────
 # Paths
@@ -21,7 +22,9 @@ CHUNKS_DB_PATH = DATA_DIR / "chunks.db"
 FAISS_PATH     = DATA_DIR / "faiss_index.bin"
 
 # ────────────────────────────────────────────────────────────────
-# Lazy loader  (called at startup AND as a safety net per-request)
+# Lazy loader
+# Uses fastembed instead of sentence-transformers to avoid pulling
+# in PyTorch (~400 MB). fastembed uses ONNX runtime (~150 MB total).
 # ────────────────────────────────────────────────────────────────
 def _lazy_load():
     global index, model, _con, _religion_ids
@@ -32,15 +35,13 @@ def _lazy_load():
         if index is not None:
             return  # another thread loaded while we waited
 
-        import numpy as np
-        from sentence_transformers import SentenceTransformer
-
         print("Loading FAISS index...")
         index = faiss.read_index(str(FAISS_PATH))
         print(f"{index.ntotal:,} vectors loaded")
 
-        print("Loading embedding model...")
-        model = SentenceTransformer(MODEL_NAME)
+        print("Loading embedding model (fastembed / ONNX)...")
+        from fastembed import TextEmbedding
+        model = TextEmbedding(model_name=MODEL_NAME)
         print("Model ready")
 
         print("Connecting to SQLite...")
@@ -71,9 +72,9 @@ TOP_K = 10
 SIMILARITY_THRESHOLD = 0.45
 
 _LANG_ALIASES = {
-    "en":      ["en", "english"],
-    "si":      ["si", "sinhala"],
-    "ta":      ["ta", "tamil"],
+    "en": ["en", "english"],
+    "si": ["si", "sinhala"],
+    "ta": ["ta", "tamil"],
 }
 
 def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
@@ -88,7 +89,8 @@ def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
 def search(query: str, religion="Buddhism", top_k=TOP_K, threshold=SIMILARITY_THRESHOLD, language="en"):
     _lazy_load()
 
-    query_vec = model.encode([query], convert_to_numpy=True)
+    # fastembed returns a generator — convert to numpy array
+    query_vec = np.array(list(model.embed([query])), dtype=np.float32)
     faiss.normalize_L2(query_vec)
 
     fetch_k = min(top_k * 10, index.ntotal)
