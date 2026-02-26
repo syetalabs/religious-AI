@@ -81,7 +81,7 @@ def root():
 def health():
     from retrieve import index, _religion_ids
 
-    data_dir = Path("/tmp/religious-ai-data")
+    data_dir = Path("/tmp/religious-ai-data/buddhism")
     faiss_path = data_dir / "faiss_index.bin"
     db_path    = data_dir / "chunks.db"
 
