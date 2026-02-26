@@ -7,7 +7,7 @@ const RECENT_CHATS = [
 ];
 
 // ─── Config ───────────────────────────────────────────────
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "https://religious-ai.onrender.com";
 
 // ─── SVG Watermark ────────────────────────────────────────
 const DharmaWheelSVG = () => (
@@ -113,14 +113,15 @@ export default function ReligiousChatbot() {
   const [activeChat, setActiveChat] = useState(null);
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState(null);
-  const [isConnected, setIsConnected] = useState(null); // null=checking, true=ok, false=down
+  const [isConnected, setIsConnected] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
   // Check backend health on mount
   useEffect(() => {
-    fetch(`${API_BASE}/`)
-      .then(r => r.ok ? setIsConnected(true) : setIsConnected(false))
+    fetch(`${API_BASE}/health`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => setIsConnected(data.status === "ready"))
       .catch(() => setIsConnected(false));
   }, []);
 
@@ -140,12 +141,12 @@ export default function ReligiousChatbot() {
     setError(null);
 
     try {
-      const response = await fetch("http://localhost:8000/ask", {
+      const response = await fetch(`${API_BASE}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: userText,
-          language: language,        // ← send selected language
+          language: language,
         }),
       });
 
@@ -167,9 +168,8 @@ export default function ReligiousChatbot() {
       setIsConnected(true);
 
     } catch (err) {
-      setError(err.message || "Could not reach the server. Is it running?");
+      setError(err.message || "Could not reach the server.");
       setIsConnected(false);
-      // Remove the user message optimistically added, or keep it — keeping is better UX
     } finally {
       setIsTyping(false);
     }
@@ -199,7 +199,6 @@ export default function ReligiousChatbot() {
     hover: "#e8d5b0",
   };
 
-  // Connection status indicator color
   const connColor = isConnected === null ? "#aaa" : isConnected ? "#4caf50" : "#e53935";
   const connLabel = isConnected === null ? "Checking..." : isConnected ? "Connected" : "Offline";
 
@@ -244,13 +243,9 @@ export default function ReligiousChatbot() {
         position: "relative", zIndex: 10
       }}>
         <div style={{ padding: "20px 14px 80px", opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s", height: "100%" }}>
-
-          {/* Logo */}
           <div style={{ textAlign: "center", marginBottom: 20 }}>
             <div style={{ fontSize: 28, marginBottom: 4 }}>☸️</div>
           </div>
-
-          {/* New Chat */}
           <button className="sidebar-btn" onClick={handleNewChat}
             style={{
               width: "100%", padding: "10px 14px", borderRadius: 10,
@@ -261,8 +256,6 @@ export default function ReligiousChatbot() {
             }}>
             <span style={{ fontSize: 16 }}>✦</span> New Chat
           </button>
-
-          {/* Recent Chats */}
           <div style={{ marginTop: 14 }}>
             <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: palette.textMuted, marginBottom: 8, paddingLeft: 4, fontFamily: "'Cinzel', serif" }}>
               Recent
@@ -282,8 +275,6 @@ export default function ReligiousChatbot() {
             ))}
           </div>
         </div>
-
-        {/* User Profile pinned to bottom */}
         <div style={{
           position: "absolute", bottom: 0, left: 0, right: 0,
           padding: "12px 14px",
@@ -295,7 +286,6 @@ export default function ReligiousChatbot() {
           <UserAvatar name="User" size={34} />
           <div style={{ flex: 1, overflow: "hidden" }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>Seeker</div>
-            {/* API connection status */}
             <div style={{ fontSize: 10, color: connColor, display: "flex", alignItems: "center", gap: 4 }}>
               <span style={{
                 display: "inline-block", width: 6, height: 6, borderRadius: "50%",
@@ -308,9 +298,8 @@ export default function ReligiousChatbot() {
         </div>
       </div>
 
-      {/* ── Main Content ── */}
+      {/* Main Content */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-
         {/* Header */}
         <div style={{
           height: 58, background: palette.header,
@@ -318,7 +307,6 @@ export default function ReligiousChatbot() {
           display: "flex", alignItems: "center", padding: "0 20px",
           gap: 12, flexShrink: 0
         }}>
-          {/* Toggle sidebar */}
           <button onClick={() => setSidebarOpen(o => !o)}
             style={{
               width: 36, height: 36, border: `1px solid ${palette.sidebarBorder}`,
@@ -328,12 +316,8 @@ export default function ReligiousChatbot() {
             }} className="icon-btn">
             {sidebarOpen ? "◁" : "▷"}
           </button>
-
           <BotAvatar size={34} />
-
           <div style={{ flex: 1 }} />
-
-          {/* Language selector */}
           <div style={{ position: "relative" }}>
             <button onClick={() => setShowLangDropdown(d => !d)}
               style={{
@@ -369,8 +353,6 @@ export default function ReligiousChatbot() {
               </div>
             )}
           </div>
-
-          {/* Home */}
           <button style={{
             padding: "7px 16px", border: `1.5px solid ${palette.sidebarBorder}`,
             borderRadius: 20, background: "transparent",
@@ -381,7 +363,6 @@ export default function ReligiousChatbot() {
 
         {/* Chat Area */}
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 10%", position: "relative" }}>
-          {/* Watermark */}
           <div style={{
             position: "absolute", top: "50%", left: "50%",
             transform: "translate(-50%, -50%)",
@@ -389,8 +370,6 @@ export default function ReligiousChatbot() {
           }}>
             <DharmaWheelSVG />
           </div>
-
-          {/* Empty state */}
           {messages.length === 0 && !isTyping && (
             <div style={{
               position: "absolute", top: "50%", left: "50%",
@@ -402,8 +381,6 @@ export default function ReligiousChatbot() {
               <div style={{ fontFamily: "'Cinzel', serif", fontSize: 14, letterSpacing: 1 }}>Ask a question about Buddhism</div>
             </div>
           )}
-
-          {/* Messages */}
           <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
             {messages.map((msg) => (
               <div key={msg.id} className="msg-anim"
@@ -427,15 +404,11 @@ export default function ReligiousChatbot() {
                   }}>
                     {msg.text}
                   </div>
-                  {/* Sources */}
                   {msg.role === "bot" && <SourcePills sources={msg.sources} palette={palette} />}
-                  {/* Confidence warning */}
                   {msg.role === "bot" && msg.warning && <ConfidenceWarning palette={palette} />}
                 </div>
               </div>
             ))}
-
-            {/* Typing indicator */}
             {isTyping && (
               <div className="msg-anim" style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
                 <BotAvatar size={30} />
@@ -457,17 +430,15 @@ export default function ReligiousChatbot() {
           padding: "14px 10%", background: palette.header,
           borderTop: `1px solid ${palette.sidebarBorder}`
         }}>
-          {/* Offline banner */}
           {isConnected === false && (
             <div style={{
               background: "#fff3e0", border: "1px solid #f5c78e",
               borderRadius: 10, padding: "8px 14px", marginBottom: 10,
               fontSize: 12, color: "#a0622a", display: "flex", alignItems: "center", gap: 8
             }}>
-              ⚠️ Backend offline — start your FastAPI server: <code style={{ background: "#fde8c8", padding: "1px 6px", borderRadius: 4 }}>uvicorn main:app --reload</code>
+              ⚠️ Backend offline — check <a href="https://religious-ai.onrender.com/health" target="_blank" rel="noreferrer" style={{ color: "#8b6914" }}>health status</a>
             </div>
           )}
-
           <div style={{
             display: "flex", alignItems: "center",
             background: palette.inputBg,
@@ -501,8 +472,6 @@ export default function ReligiousChatbot() {
                 opacity: isTyping ? 0.6 : 1
               }}
             />
-            
-            {/* Send */}
             <button
               className="send-btn"
               onClick={handleSend}
@@ -522,10 +491,7 @@ export default function ReligiousChatbot() {
         </div>
       </div>
 
-      {/* Error Toast */}
       {error && <ErrorToast message={error} onClose={() => setError(null)} />}
-
-      {/* Click outside to close dropdown */}
       {showLangDropdown && (
         <div onClick={() => setShowLangDropdown(false)}
           style={{ position: "fixed", inset: 0, zIndex: 50 }} />
