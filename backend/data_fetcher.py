@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 
-HF_REPO_ID = "sdevr/religious-ai-data"  # update this
+HF_REPO_ID = "sdevr/religious-ai-data/buddhism/"  # update this
 HF_TOKEN   = os.environ.get("HF_TOKEN", "")
 CACHE_DIR  = Path("/tmp/religious-ai-data")
 FILES      = ["faiss_index.bin", "chunks.db"]
