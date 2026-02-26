@@ -11,4 +11,4 @@ deep_translator
 langdetect
 numpy
 huggingface_hub
-fastembed
+fastembed-cpu
