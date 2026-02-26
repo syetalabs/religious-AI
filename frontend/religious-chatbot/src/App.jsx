@@ -109,7 +109,7 @@ const EnglishTranslation = ({ text, palette }) => {
           fontFamily: "'Cinzel', serif", fontSize: 10.5,
           color: palette.accentDark, letterSpacing: 0.5
         }}>
-        <span>🇬🇧 English translation</span>
+        <span> English translation</span>
         <span style={{ fontSize: 10 }}>{expanded ? "▲" : "▼"}</span>
       </button>
       {expanded && (
