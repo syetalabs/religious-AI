@@ -1,30 +1,37 @@
 import os
 import sqlite3
+import threading
 import faiss
 from pathlib import Path
 
-# Optional: use smaller local embedding
 MODEL_NAME = "all-MiniLM-L6-v2"
 
-# Global placeholders
+# Global state
 index = None
 model = None
 _con = None
 _religion_ids = {}
+_load_lock = threading.Lock()   # prevents race on concurrent first requests
 
 # ────────────────────────────────────────────────────────────────
 # Paths
 # ────────────────────────────────────────────────────────────────
-DATA_DIR = Path("/tmp/religious-ai-data")
+DATA_DIR       = Path("/tmp/religious-ai-data")
 CHUNKS_DB_PATH = DATA_DIR / "chunks.db"
-FAISS_PATH = DATA_DIR / "faiss_index.bin"
+FAISS_PATH     = DATA_DIR / "faiss_index.bin"
 
 # ────────────────────────────────────────────────────────────────
-# Lazy loader
+# Lazy loader  (called at startup AND as a safety net per-request)
 # ────────────────────────────────────────────────────────────────
 def _lazy_load():
     global index, model, _con, _religion_ids
-    if index is None:
+    if index is not None:
+        return  # already loaded — fast path, no lock needed
+
+    with _load_lock:
+        if index is not None:
+            return  # another thread loaded while we waited
+
         import numpy as np
         from sentence_transformers import SentenceTransformer
 
@@ -40,7 +47,6 @@ def _lazy_load():
         _con = sqlite3.connect(str(CHUNKS_DB_PATH), check_same_thread=False)
         _con.row_factory = sqlite3.Row
 
-        # Build religion index
         for row in _con.execute("SELECT id, religion FROM chunks"):
             _religion_ids.setdefault(row["religion"], []).append(row["id"])
         print(f"Religions indexed: {list(_religion_ids.keys())}")
@@ -59,21 +65,35 @@ def _fetch_chunks(ids):
     return {row["id"]: row for row in rows}
 
 # ────────────────────────────────
-# Search
+# Language normalisation
 # ────────────────────────────────
 TOP_K = 10
 SIMILARITY_THRESHOLD = 0.45
 
+_LANG_ALIASES = {
+    "en":      ["en", "english"],
+    "si":      ["si", "sinhala"],
+    "ta":      ["ta", "tamil"],
+}
+
+def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
+    c = chunk_lang.lower().strip()
+    r = requested_lang.lower().strip()
+    aliases = _LANG_ALIASES.get(r, [r])
+    return c in aliases or r in _LANG_ALIASES.get(c, [c])
+
+# ────────────────────────────────
+# Search
+# ────────────────────────────────
 def search(query: str, religion="Buddhism", top_k=TOP_K, threshold=SIMILARITY_THRESHOLD, language="en"):
     _lazy_load()
 
-    # Embed query
     query_vec = model.encode([query], convert_to_numpy=True)
     faiss.normalize_L2(query_vec)
 
     fetch_k = min(top_k * 10, index.ntotal)
     scores, indices = index.search(query_vec, fetch_k)
-    scores = scores[0]
+    scores  = scores[0]
     indices = indices[0]
 
     allowed_ids = set(_religion_ids.get(religion, []))
@@ -90,7 +110,7 @@ def search(query: str, religion="Buddhism", top_k=TOP_K, threshold=SIMILARITY_TH
     results = []
     for idx in candidate_ids:
         chunk = chunk_map.get(idx)
-        if chunk is None or chunk["language"] != language:
+        if chunk is None or not _lang_matches(chunk["language"], language):
             continue
         results.append({
             "text":     chunk["text"],
