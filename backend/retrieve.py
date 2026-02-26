@@ -18,7 +18,7 @@ _load_lock    = threading.Lock()
 # ────────────────────────────────────────────────────────────────
 # Paths
 # ────────────────────────────────────────────────────────────────
-DATA_DIR       = Path("/tmp/religious-ai-data")
+DATA_DIR       = Path("/tmp/religious-ai-data/buddhism")
 CHUNKS_DB_PATH = DATA_DIR / "chunks.db"
 FAISS_PATH     = DATA_DIR / "faiss_index.bin"
 MODEL_DIR      = DATA_DIR / "onnx-model"
