@@ -83,12 +83,8 @@ def root():
     return {"message": "Multi-Religious Chatbot API is running"}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
-    """
-    Check if background loading is complete.
-    Visit this URL in your browser to verify HuggingFace data is loaded.
-    """
     from retrieve import index, _religion_ids
 
     data_dir = Path("/tmp/religious-ai-data")
@@ -112,7 +108,6 @@ def health():
         "vectors":       index.ntotal if index is not None else 0,
         "religions":     list(_religion_ids.keys()) if _religion_ids else [],
     }
-
 
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
