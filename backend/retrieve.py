@@ -8,11 +8,12 @@ from pathlib import Path
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Global state
-index        = None
-model        = None
-_con         = None
+index         = None
+_tokenizer    = None
+_ort_session  = None
+_con          = None
 _religion_ids = {}
-_load_lock   = threading.Lock()   # prevents race on concurrent first requests
+_load_lock    = threading.Lock()
 
 # ────────────────────────────────────────────────────────────────
 # Paths
@@ -20,29 +21,114 @@ _load_lock   = threading.Lock()   # prevents race on concurrent first requests
 DATA_DIR       = Path("/tmp/religious-ai-data")
 CHUNKS_DB_PATH = DATA_DIR / "chunks.db"
 FAISS_PATH     = DATA_DIR / "faiss_index.bin"
+MODEL_DIR      = DATA_DIR / "onnx-model"
+
+# ────────────────────────────────────────────────────────────────
+# ONNX model download helper
+# Downloads the model once to /tmp and reuses it.
+# No PyTorch involved — onnxruntime only (~50 MB RAM).
+# ────────────────────────────────────────────────────────────────
+def _ensure_onnx_model() -> Path:
+    from huggingface_hub import hf_hub_download
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+    files = [
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "vocab.txt",
+        "onnx/model.onnx",
+    ]
+    for filename in files:
+        dest_name = filename.replace("/", "_")
+        dest = MODEL_DIR / dest_name
+        if dest.exists() and dest.stat().st_size > 0:
+            continue
+        print(f"  [model] Downloading {filename}...")
+        tmp = hf_hub_download(
+            repo_id=MODEL_NAME,
+            filename=filename,
+            cache_dir=str(MODEL_DIR / ".hf_cache"),
+        )
+        import shutil
+        shutil.copy2(tmp, dest)
+    return MODEL_DIR
+
+
+# ────────────────────────────────────────────────────────────────
+# Mean pooling (replicates sentence-transformers behaviour)
+# ────────────────────────────────────────────────────────────────
+def _mean_pool(token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+    mask = attention_mask[..., np.newaxis].astype(np.float32)
+    summed = (token_embeddings * mask).sum(axis=1)
+    counts = mask.sum(axis=1).clip(min=1e-9)
+    return summed / counts
+
+
+# ────────────────────────────────────────────────────────────────
+# Encode query → unit-normalised numpy vector
+# ────────────────────────────────────────────────────────────────
+def _encode(text: str) -> np.ndarray:
+    inputs = _tokenizer(
+        text,
+        return_tensors="np",
+        padding=True,
+        truncation=True,
+        max_length=256,
+    )
+    ort_inputs = {
+        "input_ids":      inputs["input_ids"].astype(np.int64),
+        "attention_mask": inputs["attention_mask"].astype(np.int64),
+    }
+    # some ONNX exports also expect token_type_ids
+    if "token_type_ids" in [i.name for i in _ort_session.get_inputs()]:
+        ort_inputs["token_type_ids"] = inputs["token_type_ids"].astype(np.int64)
+
+    outputs = _ort_session.run(None, ort_inputs)
+    # outputs[0] is the last hidden state: (batch, seq_len, hidden)
+    vec = _mean_pool(outputs[0], inputs["attention_mask"])
+    # L2 normalise
+    norm = np.linalg.norm(vec, axis=1, keepdims=True).clip(min=1e-9)
+    return (vec / norm).astype(np.float32)
+
 
 # ────────────────────────────────────────────────────────────────
 # Lazy loader
-# Uses fastembed instead of sentence-transformers to avoid pulling
-# in PyTorch (~400 MB). fastembed uses ONNX runtime (~150 MB total).
 # ────────────────────────────────────────────────────────────────
 def _lazy_load():
-    global index, model, _con, _religion_ids
+    global index, _tokenizer, _ort_session, _con, _religion_ids
     if index is not None:
-        return  # already loaded — fast path, no lock needed
+        return  # fast path
 
     with _load_lock:
         if index is not None:
-            return  # another thread loaded while we waited
+            return  # another thread beat us here
 
         print("Loading FAISS index...")
         index = faiss.read_index(str(FAISS_PATH))
         print(f"{index.ntotal:,} vectors loaded")
 
-        print("Loading embedding model (fastembed / ONNX)...")
-        from fastembed import TextEmbedding
-        model = TextEmbedding(model_name=MODEL_NAME)
-        print("Model ready")
+        print("Downloading / loading ONNX embedding model...")
+        model_dir = _ensure_onnx_model()
+
+        from transformers import AutoTokenizer
+        import onnxruntime as ort
+
+        _tokenizer = AutoTokenizer.from_pretrained(
+            str(model_dir),
+            local_files_only=True,
+            tokenizer_file=str(model_dir / "tokenizer.json"),
+        )
+
+        onnx_path = model_dir / "onnx_model.onnx"
+        sess_opts = ort.SessionOptions()
+        sess_opts.intra_op_num_threads = 1   # keep RAM low on free tier
+        _ort_session = ort.InferenceSession(
+            str(onnx_path),
+            sess_options=sess_opts,
+            providers=["CPUExecutionProvider"],
+        )
+        print("Embedding model ready (ONNX / no PyTorch)")
 
         print("Connecting to SQLite...")
         _con = sqlite3.connect(str(CHUNKS_DB_PATH), check_same_thread=False)
@@ -51,6 +137,7 @@ def _lazy_load():
         for row in _con.execute("SELECT id, religion FROM chunks"):
             _religion_ids.setdefault(row["religion"], []).append(row["id"])
         print(f"Religions indexed: {list(_religion_ids.keys())}")
+
 
 # ────────────────────────────────
 # Fetch chunks
@@ -64,6 +151,7 @@ def _fetch_chunks(ids):
         ids,
     ).fetchall()
     return {row["id"]: row for row in rows}
+
 
 # ────────────────────────────────
 # Language normalisation
@@ -83,14 +171,14 @@ def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
     aliases = _LANG_ALIASES.get(r, [r])
     return c in aliases or r in _LANG_ALIASES.get(c, [c])
 
+
 # ────────────────────────────────
 # Search
 # ────────────────────────────────
 def search(query: str, religion="Buddhism", top_k=TOP_K, threshold=SIMILARITY_THRESHOLD, language="en"):
     _lazy_load()
 
-    # fastembed returns a generator — convert to numpy array
-    query_vec = np.array(list(model.embed([query])), dtype=np.float32)
+    query_vec = _encode(query)          # shape: (1, 384)
     faiss.normalize_L2(query_vec)
 
     fetch_k = min(top_k * 10, index.ntotal)
