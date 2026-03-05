@@ -15,8 +15,8 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 # Models
-MODEL_DEFAULT  = "llama-3.1-8b-instant"   # English / other languages
-MODEL_SINHALA  = "qwen/qwen3-32b"         # Sinhala questions
+MODEL_DEFAULT  = "llama-3.1-8b-instant"   # English
+MODEL_SINHALA  = "qwen/qwen3-32b"         # Sinhala and Tamil (review + generation)
 
 if not GROQ_API_KEY:
     raise EnvironmentError(
@@ -31,20 +31,30 @@ if not GROQ_API_KEY:
 
 # Sinhala Unicode block: U+0D80–U+0DFF
 _SINHALA_RE = re.compile(r"[\u0D80-\u0DFF]")
+# Tamil Unicode block: U+0B80–U+0BFF
+_TAMIL_RE   = re.compile(r"[\u0B80-\u0BFF]")
 
 def _is_sinhala(text: str) -> bool:
-    """Return True if the text contains Sinhala script characters."""
     return bool(_SINHALA_RE.search(text))
+
+def _is_tamil(text: str) -> bool:
+    return bool(_TAMIL_RE.search(text))
 
 def _detect_language(question: str, language: str) -> str:
     """
     Resolve the effective language code.
-    Explicit 'sinhala'/'si' selection OR presence of Sinhala script → 'si'.
+    Explicit selection OR presence of script characters in the question text.
+    Returns: "en" | "si" | "ta"
     """
-    if language.lower() in ("si", "sinhala"):
+    lang = language.lower()
+    if lang in ("si", "sinhala"):
         return "si"
+    if lang in ("ta", "tamil"):
+        return "ta"
     if _is_sinhala(question):
         return "si"
+    if _is_tamil(question):
+        return "ta"
     return "en"
 
 # ════════════════════════════════════════════════════════════════
@@ -208,6 +218,21 @@ _FALLBACK_MESSAGES = {
         ),
         "no_context": "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ.",
     },
+    "ta": {
+        "comparative_religion": (
+            "மதங்களை ஒப்பிடும் கேள்விகள் இந்த வழிகாட்டியின் எல்லைக்கு வெளியே உள்ளன. "
+            "குறிப்பிட்ட போதனை அல்லது மறைநூல் பகுதியைப் பற்றி கேட்கவும்."
+        ),
+        "hate_speech": (
+            "இந்தக் கேள்வி மரியாதையான மத விவாதத்திற்கு பொருத்தமற்ற மொழியை கொண்டுள்ளது. "
+            "உங்கள் கேள்வியை மறுசீரமைக்கவும்."
+        ),
+        "comparative_or_unsafe": (
+            "இந்தக் கேள்வி மத மோதலை ஏற்படுத்தக்கூடும், எனவே பதிலளிக்க முடியாது. "
+            "தேர்ந்தெடுக்கப்பட்ட மதத்தின் போதனைகளைப் பற்றி குறிப்பாகக் கேட்கவும்."
+        ),
+        "no_context": "இதை சரியாக பதிலளிக்க போதுமான நம்பகமான மறைநூல் சூழல் என்னிடம் இல்லை.",
+    },
 }
 
 _VERSE_REF_PATTERNS = {
@@ -311,14 +336,37 @@ def moderate_output(
 # ════════════════════════════════════════════════════════════════
 
 def _translate_query_to_english(question: str) -> str:
-    """Translate a Sinhala question to English for FAISS retrieval only."""
-    payload = {
-        "model":    MODEL_DEFAULT,   # fast llama — we only need a short phrase
+    """
+    Translate a Sinhala or Tamil question to English for FAISS retrieval.
+
+    Two-step process:
+      Step 1 — Fast translation via llama (MODEL_DEFAULT).
+      Step 2 — Nuance verification via Qwen3 (MODEL_SINHALA).
+                Qwen3 checks whether the key concept/term in the original
+                question was translated with its correct Buddhist meaning.
+                If not, it returns a corrected English query.
+
+    This prevents mistranslations like:
+      ஏக்கம்  → "suffering"  (wrong) should be → "longing / craving / tanha"
+      ශූන්‍යතාව → "emptiness" (ok)   or → "sunyata / void" (also ok)
+
+    Falls back to the Step 1 result if Step 2 fails.
+    """
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type":  "application/json",
+    }
+
+    # ── Step 1: Fast translation ─────────────────────────────────
+    payload_1 = {
+        "model":    MODEL_DEFAULT,
         "messages": [
             {
                 "role":    "system",
                 "content": (
-                    "Translate the following Sinhala question into concise English. "
+                    "You are a translator. Translate the following question into "
+                    "concise English suitable for a Buddhist scripture search. "
+                    "Preserve the precise meaning of every religious or philosophical term. "
                     "Output ONLY the English translation — no explanation, no extra text."
                 ),
             },
@@ -327,19 +375,66 @@ def _translate_query_to_english(question: str) -> str:
         "temperature": 0.0,
         "max_tokens":  80,
     }
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type":  "application/json",
+    try:
+        resp = requests.post(GROQ_URL, headers=headers, json=payload_1, timeout=15)
+        resp.raise_for_status()
+        step1 = resp.json()["choices"][0]["message"]["content"].strip()
+        step1 = re.sub(r"<think>.*?</think>", "", step1, flags=re.DOTALL).strip()
+        step1 = step1 or question
+    except Exception:
+        return question   # total failure — return original
+
+    # ── Step 2: Nuance verification ──────────────────────────────
+    # Detect source language for the verification prompt
+    src_lang = "Tamil" if _is_tamil(question) else "Sinhala"
+
+    payload_2 = {
+        "model":    MODEL_SINHALA,
+        "messages": [
+            {
+                "role":    "system",
+                "content": (
+                    "You are a Buddhist scholar fluent in Pali, English, Sinhala, and Tamil.\n\n"
+                    "Your task: verify that an English translation of a Buddhist question "
+                    "correctly preserves the nuance of the key concept or term.\n\n"
+                    "Rules:\n"
+                    "1. Identify the main Buddhist concept or term in the original question.\n"
+                    "2. Check if the English translation captures its correct Buddhist meaning.\n"
+                    "   - Example of BAD translation: ஏக்கம் → 'suffering' "
+                    "(ஏக்கம் means longing/yearning, closer to taṇhā, not dukkha)\n"
+                    "   - Example of GOOD translation: ஏக்கம் → 'longing or craving (tanha) in Buddhism'\n"
+                    "   - Example of GOOD translation: ශූන්‍යතාව → 'sunyata (emptiness) in Buddhism'\n"
+                    "3. If the translation is correct, return it UNCHANGED.\n"
+                    "4. If the translation is wrong or loses important nuance, return a corrected "
+                    "English query that will retrieve the right Buddhist scripture passages.\n"
+                    "5. Output ONLY the final English query — no explanation, no commentary."
+                ),
+            },
+            {
+                "role":    "user",
+                "content": (
+                    f"Original {src_lang} question: {question}\n"
+                    f"English translation to verify: {step1}"
+                ),
+            },
+        ],
+        "temperature": 0.0,
+        "max_tokens":  120,
     }
     try:
-        resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=15)
+        resp = requests.post(GROQ_URL, headers=headers, json=payload_2, timeout=20)
         resp.raise_for_status()
-        translated = resp.json()["choices"][0]["message"]["content"].strip()
-        # Strip any accidental <think> blocks from llama too
-        translated = re.sub(r"<think>.*?</think>", "", translated, flags=re.DOTALL).strip()
-        return translated or question
+        step2 = resp.json()["choices"][0]["message"]["content"].strip()
+        step2 = re.sub(r"<think>.*?</think>", "", step2, flags=re.DOTALL).strip()
+        if step2 and len(step2) > 5:
+            if step2 != step1:
+                print(f"  [translate] Step1: {step1!r}")
+                print(f"  [translate] Step2 corrected: {step2!r}")
+            return step2
     except Exception:
-        return question   # fall back to original — FAISS will score low but won't crash
+        pass   # step 2 failed — use step 1 result
+
+    return step1
 
 
 # ════════════════════════════════════════════════════════════════
@@ -669,60 +764,83 @@ def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
     return _trim_incomplete_sentence(raw)
 
 
-def _review_sinhala_translation(
+def _review_translation(
     original_english: str,
-    translated_sinhala: str,
+    translated_text: str,
     religion: str,
+    target_lang: str,        # "si" or "ta"
 ) -> str:
     """
-    Send the translated Sinhala answer to Qwen3 for a language review.
-
-    Qwen3 is asked to:
-      - Fix unnatural or incorrect Sinhala phrasing.
-      - Replace mistranslated terms with correct Buddhist/Christian Sinhala
-        equivalents (e.g. "ඉන්ධන" → "හේතුව", literal Google Translate artifacts).
-      - Preserve the meaning of the original English answer exactly.
-      - Return ONLY the corrected Sinhala text — no explanation, no English.
-
-    If the call fails or returns an empty result the original translation is
-    returned unchanged so the pipeline never breaks.
+    Send the translated answer to Qwen3 for a language review.
+    Fixes unnatural phrasing, wrong terminology, and cross-religion term leakage.
+    Returns the corrected text, or the original translation if the call fails.
     """
-    religion_note = {
-        "Buddhism": (
-            "මෙය බෞද්ධ පිළිතුරකි. නිවැරදි බෞද්ධ සිංහල පාරිභාෂිතය භාවිත කරන්න "
-            "(නිදසුන්: නිර්වාණය, දුක්ඛය, උපාදානය, තණ්හාව, අනිත්‍ය, අනාත්ම, "
-            "ත්‍රිපිටකය, ධර්ම ග්‍රන්ථය, සූත්‍ර පිටකය, විනය පිටකය, අභිධර්ම පිටකය).\n"
-            "- 'ශුද්ධ ලියවිල්ල' යනු ක්‍රිස්තියානි පදයකි — බෞද්ධ පිළිතුරක් තුළ කිසිවිටෙකත් "
-            "භාවිත නොකරන්න. ඒ වෙනුවට 'ත්‍රිපිටකය', 'ධර්ම ග්‍රන්ථය', හෝ නිශ්චිත "
-            "ග්‍රන්ථ නාමය (නිදසුන්: 'සංයුත්ත නිකායේ') භාවිත කරන්න.\n"
-            "- 'ඉන්ධන' (petrol/fuel) වෙනුවට 'හේතුව' හෝ 'උපාදානය' භාවිත කරන්න.\n"
-            "- 'දෙවියන්' හෝ ක්‍රිස්තියානි/ඉස්ලාම් සංකල්ප බෞද්ධ පිළිතුරක "
-            "ඇතුළත් නොකරන්න."
-        ),
-        "Christianity": (
-            "මෙය ක්‍රිස්තියානි පිළිතුරකි. නිවැරදි ක්‍රිස්තියානි සිංහල පාරිභාෂිතය භාවිත කරන්න "
-            "(නිදසුන්: ත්‍රිත්වය, ගැලවීම, ඇදහිල්ල, කරුණාව, ශුද්ධ ලියවිල්ල, බයිබලය).\n"
-            "- 'ත්‍රිපිටකය', 'නිර්වාණය' හෝ බෞද්ධ සංකල්ප ක්‍රිස්තියානි පිළිතුරක "
-            "ඇතුළත් නොකරන්න."
-        ),
-    }.get(religion, "නිවැරදි සහ ස්වාභාවික සිංහල ආගමික පාරිභාෂිතය භාවිත කරන්න.")
+    if target_lang == "ta":
+        religion_note = {
+            "Buddhism": (
+                "இது ஒரு பௌத்த பதில். சரியான பௌத்த தமிழ் சொற்களை பயன்படுத்தவும் "
+                "(எ.கா. நிர்வாணம், துக்கம், தண்ணா, அனித்யம், அனாத்மா, திரிபிடகம்).\n"
+                "- 'புனித வேதம்' அல்லது கிறிஸ்தவ/இஸ்லாமிய சொற்களை பௌத்த பதிலில் "
+                "சேர்க்க வேண்டாம்.\n"
+                "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
+            ),
+            "Christianity": (
+                "இது ஒரு கிறிஸ்தவ பதில். சரியான கிறிஸ்தவ தமிழ் சொற்களை பயன்படுத்தவும் "
+                "(எ.கா. திரித்துவம், இரட்சிப்பு, விசுவாசம், அன்பு, பைபிள்).\n"
+                "- பௌத்த சொற்களை கிறிஸ்தவ பதிலில் சேர்க்க வேண்டாம்."
+            ),
+        }.get(religion, "சரியான மற்றும் இயற்கையான தமிழ் மத சொற்களை பயன்படுத்தவும்.")
 
-    system_prompt = (
-        "ඔබ සිංහල භාෂා විශේෂඥයෙකු සහ ආගමික පරිවර්තන සමාලෝචකයෙකි.\n\n"
-        "ඔබේ කාර්යය:\n"
-        "1. ලබා දී ඇති සිංහල පරිවර්තනය සමාලෝචනය කරන්න.\n"
-        "2. අස්වාභාවික, වැරදි, හෝ Google Translate ගැටළු නිවැරදි කරන්න.\n"
-        f"3. {religion_note}\n"
-        "4. වෙනත් ආගම්වලට අයත් පද හෝ සංකල්ප (cross-religion terminology) "
-        "ඉවත් කර නිවැරදි ආගමික පාරිභාෂිතයෙන් ප්‍රතිස්ථාපනය කරන්න.\n"
-        "5. මුල් ඉංග්‍රීසි පිළිතුරේ අර්ථය හරියටම ආරක්ෂා කරන්න.\n"
-        "6. නිවැරදි කළ සිංහල පාඨය පමණක් ලබා දෙන්න. "
-        "කිසිදු පැහැදිලි කිරීමක්, ඉංග්‍රීසි, හෝ ටිප්පණි නොතිබිය යුතුය."
-    )
+        system_prompt = (
+            "நீங்கள் தமிழ் மொழி நிபுணர் மற்றும் மத மொழிபெயர்ப்பு மதிப்பாய்வாளர்.\n\n"
+            "உங்கள் பணி:\n"
+            "1. கொடுக்கப்பட்ட தமிழ் மொழிபெயர்ப்பை மதிப்பாய்வு செய்யுங்கள்.\n"
+            "2. இயற்கையற்ற, தவறான, அல்லது Google Translate பிழைகளை சரிசெய்யுங்கள்.\n"
+            f"3. {religion_note}\n"
+            "4. மூல ஆங்கில பதிலின் அர்த்தத்தை சரியாக பாதுகாக்கவும்.\n"
+            "5. சரிசெய்யப்பட்ட தமிழ் உரையை மட்டும் வழங்குங்கள். "
+            "எந்த விளக்கமும், ஆங்கிலமும், குறிப்புகளும் இருக்கக்கூடாது."
+        )
+    else:
+        # Sinhala
+        religion_note = {
+            "Buddhism": (
+                "මෙය බෞද්ධ පිළිතුරකි. නිවැරදි බෞද්ධ සිංහල පාරිභාෂිතය භාවිත කරන්න "
+                "(නිදසුන්: නිර්වාණය, දුක්ඛය, උපාදානය, තණ්හාව, අනිත්‍ය, අනාත්ම, "
+                "ත්‍රිපිටකය, ධර්ම ග්‍රන්ථය, සූත්‍ර පිටකය, විනය පිටකය, අභිධර්ම පිටකය).\n"
+                "- 'ශුද්ධ ලියවිල්ල' යනු ක්‍රිස්තියානි පදයකි — බෞද්ධ පිළිතුරක් තුළ කිසිවිටෙකත් "
+                "භාවිත නොකරන්න. ඒ වෙනුවට 'ත්‍රිපිටකය', 'ධර්ම ග්‍රන්ථය', හෝ නිශ්චිත "
+                "ග්‍රන්ථ නාමය (නිදසුන්: 'සංයුත්ත නිකායේ') භාවිත කරන්න.\n"
+                "- 'ඉන්ධන' (petrol/fuel) වෙනුවට 'හේතුව' හෝ 'උපාදානය' භාවිත කරන්න.\n"
+                "- 'දෙවියන්' හෝ ක්‍රිස්තියානි/ඉස්ලාම් සංකල්ප බෞද්ධ පිළිතුරක "
+                "ඇතුළත් නොකරන්න."
+            ),
+            "Christianity": (
+                "මෙය ක්‍රිස්තියානි පිළිතුරකි. නිවැරදි ක්‍රිස්තියානි සිංහල පාරිභාෂිතය භාවිත කරන්න "
+                "(නිදසුන්: ත්‍රිත්වය, ගැලවීම, ඇදහිල්ල, කරුණාව, ශුද්ධ ලියවිල්ල, බයිබලය).\n"
+                "- 'ත්‍රිපිටකය', 'නිර්වාණය' හෝ බෞද්ධ සංකල්ප ක්‍රිස්තියානි පිළිතුරක "
+                "ඇතුළත් නොකරන්න."
+            ),
+        }.get(religion, "නිවැරදි සහ ස්වාභාවික සිංහල ආගමික පාරිභාෂිතය භාවිත කරන්න.")
+
+        system_prompt = (
+            "ඔබ සිංහල භාෂා විශේෂඥයෙකු සහ ආගමික පරිවර්තන සමාලෝචකයෙකි.\n\n"
+            "ඔබේ කාර්යය:\n"
+            "1. ලබා දී ඇති සිංහල පරිවර්තනය සමාලෝචනය කරන්න.\n"
+            "2. අස්වාභාවික, වැරදි, හෝ Google Translate ගැටළු නිවැරදි කරන්න.\n"
+            f"3. {religion_note}\n"
+            "4. වෙනත් ආගම්වලට අයත් පද හෝ සංකල්ප (cross-religion terminology) "
+            "ඉවත් කර නිවැරදි ආගමික පාරිභාෂිතයෙන් ප්‍රතිස්ථාපනය කරන්න.\n"
+            "5. මුල් ඉංග්‍රීසි පිළිතුරේ අර්ථය හරියටම ආරක්ෂා කරන්න.\n"
+            "6. නිවැරදි කළ සිංහල පාඨය පමණක් ලබා දෙන්න. "
+            "කිසිදු පැහැදිලි කිරීමක්, ඉංග්‍රීසි, හෝ ටිප්පණි නොතිබිය යුතුය."
+        )
 
     user_message = (
-        f"මුල් ඉංග්‍රීසි පිළිතුර:\n{original_english}\n\n"
-        f"සිංහල පරිවර්තනය (සමාලෝචනය කරන්න):\n{translated_sinhala}"
+        f"{'மூல ஆங்கில பதில்' if target_lang == 'ta' else 'මුල් ඉංග්‍රීසි පිළිතුර'}:\n"
+        f"{original_english}\n\n"
+        f"{'தமிழ் மொழிபெயர்ப்பு (மதிப்பாய்வு செய்யவும்)' if target_lang == 'ta' else 'සිංහල පරිවර්තනය (සමාලෝචනය කරන්න)'}:\n"
+        f"{translated_text}"
     )
 
     reviewed = _call_groq(system_prompt, user_message, MODEL_SINHALA)
@@ -730,25 +848,31 @@ def _review_sinhala_translation(
     reviewed = re.sub(r"<think>.*$",         "", reviewed, flags=re.DOTALL).strip()
 
     if not reviewed or len(reviewed) < 20:
-        print("  [review] Qwen3 review returned empty — keeping original translation")
-        return translated_sinhala
+        print(f"  [review] Qwen3 review returned empty — keeping original translation")
+        return translated_text
 
-    print("  [review] Qwen3 review applied")
+    print(f"  [review] Qwen3 review applied ({target_lang})")
     return reviewed
 
 
-def _english_context_then_translate(question: str, en_query: str, religion: str) -> dict:
+def _english_context_then_translate(
+    question: str,
+    en_query: str,
+    religion: str,
+    target_lang: str = "si",   # "si" or "ta"
+) -> dict:
     """
-    Fallback path for Sinhala questions with no Sinhala scripture data:
+    Fallback path for Sinhala/Tamil questions with no native scripture data:
       1. Retrieve English scripture chunks using the translated query.
       2. Generate an English answer.
-      3. Translate the answer to Sinhala.
+      3. Translate the answer to the target language.
+      4. Qwen3 review to fix terminology and phrasing.
     """
     try:
         from translator import translate_from_english
     except ImportError:
         return {
-            "answer": _FALLBACK_MESSAGES["si"]["no_context"],
+            "answer": _FALLBACK_MESSAGES.get(target_lang, _FALLBACK_MESSAGES["en"])["no_context"],
             "sources": [], "scores": [], "flagged": False,
             "low_confidence": True, "warnings": ["translator_unavailable"],
         }
@@ -756,39 +880,39 @@ def _english_context_then_translate(question: str, en_query: str, religion: str)
     en_res = search(en_query, religion=religion, language="en")
     if not en_res:
         return {
-            "answer": _FALLBACK_MESSAGES["si"]["no_context"],
+            "answer": _FALLBACK_MESSAGES.get(target_lang, _FALLBACK_MESSAGES["en"])["no_context"],
             "sources": [], "scores": [], "flagged": False,
             "low_confidence": True, "warnings": ["no_en_context"],
         }
 
-    en_res  = _refine_results(en_res, religion)
-    en_ans  = _build_english_answer(en_query, en_res, religion)
+    en_res = _refine_results(en_res, religion)
+    en_ans = _build_english_answer(en_query, en_res, religion)
 
     if not en_ans or "I do not have enough" in en_ans:
         return {
-            "answer": _FALLBACK_MESSAGES["si"]["no_context"],
+            "answer": _FALLBACK_MESSAGES.get(target_lang, _FALLBACK_MESSAGES["en"])["no_context"],
             "sources": [], "scores": [], "flagged": False,
             "low_confidence": True, "warnings": ["no_en_answer"],
         }
 
-    # Translate the English answer to Sinhala
-    si_ans = translate_from_english(en_ans, "si")
-    si_ans = _trim_incomplete_sentence(si_ans)
+    # Translate to target language then Qwen3 review
+    translated = translate_from_english(en_ans, target_lang)
+    translated  = _trim_incomplete_sentence(translated)
+    translated  = _review_translation(en_ans, translated, religion, target_lang)
+    translated  = _trim_incomplete_sentence(translated)
+    if target_lang == "si":
+        translated = _apply_respectful_titles(translated)
 
-    # Qwen3 review: fix unnatural phrasing and mistranslated terms
-    si_ans = _review_sinhala_translation(en_ans, si_ans, religion)
-    si_ans = _trim_incomplete_sentence(si_ans)
-    si_ans = _apply_respectful_titles(si_ans)
-
-    matched = [r for r in en_res if r["book"].lower() in si_ans.lower()]
+    warning_key = f"used_en_context_with_translation_{target_lang}"
+    matched = [r for r in en_res if r["book"].lower() in translated.lower()]
     disp    = matched if matched else en_res
     return {
-        "answer":         si_ans,
+        "answer":         translated,
         "sources":        [r["book"]  for r in disp],
         "scores":         [r["score"] for r in disp],
         "flagged":        False,
         "low_confidence": False,
-        "warnings":       ["used_en_context_with_translation"],
+        "warnings":       [warning_key],
     }
 
 
@@ -822,7 +946,7 @@ def answer_question(
 
     # ── Resolve effective language ───────────────────────────────
     lang  = _detect_language(question, language)
-    model = MODEL_SINHALA if lang == "si" else MODEL_DEFAULT
+    model = MODEL_SINHALA if lang in ("si", "ta") else MODEL_DEFAULT
 
     # ── Layer 1: Input moderation ────────────────────────────────
     is_safe, reason = moderate_input(question)
@@ -836,6 +960,15 @@ def answer_question(
             "low_confidence": False,
             "warnings":       [reason],
         }
+
+    # ════════════════════════════════════════════════════════════
+    # TAMIL PATH — no Tamil scripture in DB, always use English
+    # context + translate to Tamil
+    # ════════════════════════════════════════════════════════════
+    if lang == "ta":
+        en_query = _translate_query_to_english(question)
+        print(f"  [ta] EN query: {en_query!r}")
+        return _english_context_then_translate(question, en_query, religion, target_lang="ta")
 
     # ════════════════════════════════════════════════════════════
     # SINHALA PATH
@@ -888,7 +1021,7 @@ def answer_question(
                 si_ans = _trim_incomplete_sentence(si_ans)
 
                 # Qwen3 review: fix unnatural phrasing and mistranslated terms
-                si_ans = _review_sinhala_translation(raw, si_ans, religion)
+                si_ans = _review_translation(raw, si_ans, religion, "si")
                 si_ans = _trim_incomplete_sentence(si_ans)
                 si_ans = _apply_respectful_titles(si_ans)
 
@@ -910,7 +1043,7 @@ def answer_question(
 
         # ── Step 3b: No usable Sinhala chunks — use English context ─
         print("  [si] No Sinhala chunks — falling back to English context + translation")
-        return _english_context_then_translate(question, en_query, religion)
+        return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
     # ════════════════════════════════════════════════════════════
     # ENGLISH PATH  (unchanged)

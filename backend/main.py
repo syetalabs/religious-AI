@@ -65,7 +65,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     religion: str = "Buddhism"
-    language: str = "en"   # "en" | "si" — passed directly to answer_question
+    language: str = "en"   # "en" | "si" | "ta" — passed directly to answer_question
 
 
 # ════════════════════════════════════════════════
