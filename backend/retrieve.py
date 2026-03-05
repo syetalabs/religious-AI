@@ -1,4 +1,3 @@
-import os
 import sqlite3
 import threading
 import numpy as np
@@ -16,20 +15,19 @@ _religion_ids = {}
 _load_lock    = threading.Lock()
 
 # ────────────────────────────────────────────────────────────────
-# Paths
+# Paths  — updated to bilingual -en-si files
 # ────────────────────────────────────────────────────────────────
 DATA_DIR       = Path("/tmp/religious-ai-data/buddhism")
-CHUNKS_DB_PATH = DATA_DIR / "chunks.db"
-FAISS_PATH     = DATA_DIR / "faiss_index.bin"
+CHUNKS_DB_PATH = DATA_DIR / "chunks-en-si.db"
+FAISS_PATH     = DATA_DIR / "faiss_index-en-si.bin"
 MODEL_DIR      = DATA_DIR / "onnx-model"
 
 # ────────────────────────────────────────────────────────────────
 # ONNX model download helper
-# Downloads the model once to /tmp and reuses it.
-# No PyTorch involved — onnxruntime only (~50 MB RAM).
 # ────────────────────────────────────────────────────────────────
 def _ensure_onnx_model() -> Path:
     from huggingface_hub import hf_hub_download
+    import shutil
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     files = [
@@ -40,7 +38,7 @@ def _ensure_onnx_model() -> Path:
         "onnx/model.onnx",
     ]
     for filename in files:
-        dest_name = filename.replace("/", "_")
+        dest_name = filename.replace("/", "_")   # "onnx/model.onnx" → "onnx_model.onnx"
         dest = MODEL_DIR / dest_name
         if dest.exists() and dest.stat().st_size > 0:
             continue
@@ -50,13 +48,12 @@ def _ensure_onnx_model() -> Path:
             filename=filename,
             cache_dir=str(MODEL_DIR / ".hf_cache"),
         )
-        import shutil
         shutil.copy2(tmp, dest)
     return MODEL_DIR
 
 
 # ────────────────────────────────────────────────────────────────
-# Mean pooling (replicates sentence-transformers behaviour)
+# Mean pooling
 # ────────────────────────────────────────────────────────────────
 def _mean_pool(token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
     mask = attention_mask[..., np.newaxis].astype(np.float32)
@@ -67,6 +64,8 @@ def _mean_pool(token_embeddings: np.ndarray, attention_mask: np.ndarray) -> np.n
 
 # ────────────────────────────────────────────────────────────────
 # Encode query → unit-normalised numpy vector
+# Always encode English text — Sinhala queries must be translated
+# before calling _encode() because all-MiniLM-L6-v2 is English-only.
 # ────────────────────────────────────────────────────────────────
 def _encode(text: str) -> np.ndarray:
     inputs = _tokenizer(
@@ -80,14 +79,11 @@ def _encode(text: str) -> np.ndarray:
         "input_ids":      inputs["input_ids"].astype(np.int64),
         "attention_mask": inputs["attention_mask"].astype(np.int64),
     }
-    # some ONNX exports also expect token_type_ids
     if "token_type_ids" in [i.name for i in _ort_session.get_inputs()]:
         ort_inputs["token_type_ids"] = inputs["token_type_ids"].astype(np.int64)
 
     outputs = _ort_session.run(None, ort_inputs)
-    # outputs[0] is the last hidden state: (batch, seq_len, hidden)
     vec = _mean_pool(outputs[0], inputs["attention_mask"])
-    # L2 normalise
     norm = np.linalg.norm(vec, axis=1, keepdims=True).clip(min=1e-9)
     return (vec / norm).astype(np.float32)
 
@@ -98,11 +94,11 @@ def _encode(text: str) -> np.ndarray:
 def _lazy_load():
     global index, _tokenizer, _ort_session, _con, _religion_ids
     if index is not None:
-        return  # fast path
+        return
 
     with _load_lock:
         if index is not None:
-            return  # another thread beat us here
+            return
 
         print("Loading FAISS index...")
         index = faiss.read_index(str(FAISS_PATH))
@@ -122,7 +118,7 @@ def _lazy_load():
 
         onnx_path = model_dir / "onnx_model.onnx"
         sess_opts = ort.SessionOptions()
-        sess_opts.intra_op_num_threads = 1   # keep RAM low on free tier
+        sess_opts.intra_op_num_threads = 1
         _ort_session = ort.InferenceSession(
             str(onnx_path),
             sess_options=sess_opts,
@@ -157,7 +153,7 @@ def _fetch_chunks(ids):
 # Language normalisation
 # ────────────────────────────────
 TOP_K = 10
-SIMILARITY_THRESHOLD = 0.45
+SIMILARITY_THRESHOLD = 0.30   # lowered from 0.45 — Sinhala chunks may score lower
 
 _LANG_ALIASES = {
     "en": ["en", "english"],
@@ -172,21 +168,121 @@ def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
     return c in aliases or r in _LANG_ALIASES.get(c, [c])
 
 
-# ────────────────────────────────
+# ────────────────────────────────────────────────────────────────
 # Search
-# ────────────────────────────────
-def search(query: str, religion="Buddhism", top_k=TOP_K, threshold=SIMILARITY_THRESHOLD, language="en"):
+#
+# HOW SINHALA RETRIEVAL WORKS:
+#   The FAISS index was built from English text only — Sinhala chunks
+#   score near-zero against any query and never appear in top results.
+#
+#   For language="si":
+#     1. Use FAISS to find the best *English* chunks (scores 0.7-0.8)
+#     2. Collect the unique `source` values of those English chunks
+#        (e.g. ["dn", "mn", "sn"])
+#     3. Fetch Sinhala chunks from the same sources directly from the DB
+#     4. Return those Sinhala chunks with the English score attached
+#
+#   For language="en": standard FAISS → filter pipeline unchanged.
+# ────────────────────────────────────────────────────────────────
+def search_sinhala_direct(
+    en_query: str,
+    religion: str = "Buddhism",
+    top_k: int = TOP_K,
+    threshold: float = SIMILARITY_THRESHOLD,
+) -> list[dict]:
+    """
+    Check whether Sinhala scripture chunks exist in the DB that are relevant
+    to the question.
+
+    Strategy:
+      1. Embed the English translation of the query.
+      2. Run FAISS to find top candidate chunk IDs (all languages).
+      3. Among those candidates, look for chunks with language='si'.
+      4. Return only Sinhala chunks that pass the score threshold.
+
+    Returns an empty list when no relevant Sinhala chunks are found,
+    which tells the caller to fall back to English retrieval + translation.
+    """
     _lazy_load()
 
-    query_vec = _encode(query)          # shape: (1, 384)
+    query_vec = _encode(en_query)
     faiss.normalize_L2(query_vec)
 
-    fetch_k = min(top_k * 10, index.ntotal)
+    fetch_k = min(top_k * 20, index.ntotal)
     scores, indices = index.search(query_vec, fetch_k)
     scores  = scores[0]
     indices = indices[0]
 
     allowed_ids = set(_religion_ids.get(religion, []))
+
+    candidate_ids = [
+        int(idx) for score, idx in zip(scores, indices)
+        if idx != -1 and int(idx) in allowed_ids and float(score) >= threshold
+    ]
+    if not candidate_ids:
+        return []
+
+    chunk_map = _fetch_chunks(candidate_ids)
+    score_map = {int(idx): float(score) for score, idx in zip(scores, indices) if idx != -1}
+
+    results = []
+    for idx in candidate_ids:
+        chunk = chunk_map.get(idx)
+        if chunk is None or not _lang_matches(chunk["language"], "si"):
+            continue
+        results.append({
+            "text":     chunk["text"],
+            "book":     chunk["book"],
+            "pitaka":   chunk["pitaka"],
+            "source":   chunk["source"],
+            "religion": chunk["religion"],
+            "language": chunk["language"],
+            "score":    score_map[idx],
+        })
+        if len(results) >= top_k:
+            break
+
+    return results
+
+
+def _fetch_sinhala_by_sources(sources: list[str], religion: str, top_k: int) -> list[dict]:
+    """Fetch Sinhala chunks from the DB for the given source codes."""
+    if not sources:
+        return []
+    placeholders = ",".join("?" * len(sources))
+    rows = _con.execute(
+        f"""SELECT id, text, book, pitaka, source, religion, language
+            FROM chunks
+            WHERE language='si' AND religion=? AND source IN ({placeholders})
+            LIMIT ?""",
+        [religion] + sources + [top_k * 4],
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def search(
+    query: str,
+    religion: str = "Buddhism",
+    top_k: int = TOP_K,
+    threshold: float = SIMILARITY_THRESHOLD,
+    language: str = "en",
+) -> list[dict]:
+    """
+    Search for English scripture chunks relevant to the query.
+    For Sinhala retrieval use search_sinhala_direct() instead.
+    """
+    _lazy_load()
+
+    query_vec = _encode(query)
+    faiss.normalize_L2(query_vec)
+
+    fetch_k = min(top_k * 20, index.ntotal)
+    scores, indices = index.search(query_vec, fetch_k)
+    scores  = scores[0]
+    indices = indices[0]
+
+    allowed_ids = set(_religion_ids.get(religion, []))
+
     candidate_ids = [
         int(idx) for score, idx in zip(scores, indices)
         if idx != -1 and int(idx) in allowed_ids and float(score) >= threshold
