@@ -399,15 +399,147 @@ def _translate_query_to_english(question: str) -> str:
                     "correctly preserves the nuance of the key concept or term.\n\n"
                     "Rules:\n"
                     "1. Identify the main Buddhist concept or term in the original question.\n"
-                    "2. Check if the English translation captures its correct Buddhist meaning.\n"
-                    "   - Example of BAD translation: ஏக்கம் → 'suffering' "
-                    "(ஏக்கம் means longing/yearning, closer to taṇhā, not dukkha)\n"
-                    "   - Example of GOOD translation: ஏக்கம் → 'longing or craving (tanha) in Buddhism'\n"
-                    "   - Example of GOOD translation: ශූන්‍යතාව → 'sunyata (emptiness) in Buddhism'\n"
+                    "2. Check if the English translation captures its correct Buddhist meaning "
+                    "using the reference glossary below.\n"
                     "3. If the translation is correct, return it UNCHANGED.\n"
                     "4. If the translation is wrong or loses important nuance, return a corrected "
                     "English query that will retrieve the right Buddhist scripture passages.\n"
-                    "5. Output ONLY the final English query — no explanation, no commentary."
+                    "5. Output ONLY the final English query — no explanation, no commentary.\n\n"
+
+                    "═══ TAMIL → PALI / ENGLISH GLOSSARY ═══\n\n"
+
+                    "THREE MARKS OF EXISTENCE:\n"
+                    "  அனிச்சை       → impermanence (anicca) — NOT craving, NOT suffering\n"
+                    "  துக்கம்       → suffering / unsatisfactoriness (dukkha) — NOT craving\n"
+                    "  அனாத்தா      → no-self / non-self (anattā) — NOT soul\n\n"
+
+                    "FOUR NOBLE TRUTHS:\n"
+                    "  நான்கு ஆரிய சத்தியங்கள் → Four Noble Truths (cattāri ariyasaccāni)\n"
+                    "  துக்க சத்தியம்           → truth of suffering (dukkha-sacca)\n"
+                    "  சமுதய சத்தியம்           → truth of the origin of suffering (samudaya-sacca)\n"
+                    "  நிரோத சத்தியம்           → truth of the cessation of suffering (nirodha-sacca)\n"
+                    "  மார்க்க சத்தியம்         → truth of the path (magga-sacca)\n\n"
+
+                    "CRAVING AND CLINGING:\n"
+                    "  தண்ணா / ஏக்கம்  → craving / taṇhā — longing that leads to rebirth\n"
+                    "  உபாதானம்        → clinging / attachment (upādāna)\n"
+                    "  ராகம்           → passion / greed / lust (rāga)\n"
+                    "  லோபம்           → greed (lobha)\n"
+                    "  துவேஷம்         → hatred / aversion (dosa)\n"
+                    "  மோகம்           → delusion / ignorance (moha)\n"
+                    "  அவிஜ்ஜா        → ignorance (avijjā) — root of suffering\n\n"
+
+                    "THE PATH:\n"
+                    "  அஷ்டாங்க மார்க்கம் → Noble Eightfold Path (aṭṭhaṅgika-magga)\n"
+                    "  சம்மா தீட்டி      → right view (sammā-diṭṭhi)\n"
+                    "  சம்மா சங்கப்பம்   → right intention (sammā-saṅkappa)\n"
+                    "  சம்மா வாக்கு      → right speech (sammā-vācā)\n"
+                    "  சம்மா கம்மந்தம்   → right action (sammā-kammanta)\n"
+                    "  சம்மா ஆஜீவம்     → right livelihood (sammā-ājīva)\n"
+                    "  சம்மா வாயாமம்    → right effort (sammā-vāyāma)\n"
+                    "  சம்மா சதி        → right mindfulness (sammā-sati)\n"
+                    "  சம்மா சமாதி      → right concentration (sammā-samādhi)\n\n"
+
+                    "MEDITATION:\n"
+                    "  விபஸ்ஸனா        → insight meditation (vipassanā)\n"
+                    "  சமதா            → calm / concentration meditation (samatha)\n"
+                    "  சமாதி           → concentration / meditative absorption (samādhi)\n"
+                    "  ஜானம்           → meditative absorption / jhāna\n"
+                    "  சதி             → mindfulness (sati)\n"
+                    "  பாவனா           → mental cultivation / meditation (bhāvanā)\n"
+                    "  அனாபானசதி       → mindfulness of breathing (ānāpānasati)\n\n"
+
+                    "LIBERATION AND AWAKENING:\n"
+                    "  நிர்வாணம்       → nibbāna / nirvana — liberation, NOT a place or heaven\n"
+                    "  போதி            → awakening / enlightenment (bodhi)\n"
+                    "  விமுக்தி        → liberation / release (vimutti)\n"
+                    "  அரஹந்த்         → arahant — fully enlightened being\n"
+                    "  போதிசத்வம்      → bodhisattva — being on path to full Buddhahood\n"
+                    "  பரிநிர்வாணம்    → parinibbāna — final liberation at death\n\n"
+
+                    "DEPENDENT ORIGINATION AND REALITY:\n"
+                    "  பதிச்சசமுப்பாதம் → dependent origination (paṭicca-samuppāda)\n"
+                    "  சூன்யதா         → emptiness (suññatā) — NOT nothingness\n"
+                    "  சங்காரம்        → formations / conditioned phenomena (saṅkhāra)\n"
+                    "  நாமரூபம்        → name-and-form / mind-matter (nāmarūpa)\n"
+                    "  விஞ்ஞானம்       → consciousness (viññāna)\n"
+                    "  வேதனா           → feeling / sensation (vedanā) — pleasant/unpleasant/neutral\n"
+                    "  சஞ்ஞா           → perception (saññā)\n"
+                    "  சேதனா           → volition / intention (cetanā)\n"
+                    "  பஞ்சக்கந்தங்கள் → five aggregates (pañcakkhandhā)\n"
+                    "  ரூபம்           → form / materiality (rūpa)\n\n"
+
+                    "ETHICS AND CONDUCT:\n"
+                    "  கர்மா / கம்மம்  → karma — intentional action, NOT fate\n"
+                    "  சீலம்           → virtue / ethical conduct (sīla)\n"
+                    "  பஞ்சசீலம்       → five precepts (pañcasīla)\n"
+                    "  தானம்           → generosity / giving (dāna)\n"
+                    "  அஹிம்சா        → non-harming / non-violence (ahiṃsā)\n"
+                    "  மெட்டா          → loving-kindness (mettā)\n"
+                    "  கருணை           → compassion (karuṇā)\n"
+                    "  முதிதா          → sympathetic joy (muditā)\n"
+                    "  உபேக்கா         → equanimity (upekkhā)\n"
+                    "  பிரஜ்ஞா         → wisdom / insight (paññā)\n\n"
+
+                    "REBIRTH AND EXISTENCE:\n"
+                    "  மறுபிறவி        → rebirth (punabbhava)\n"
+                    "  சம்சாரம்        → cycle of rebirth (saṃsāra)\n"
+                    "  புனர்ஜன்மம்     → rebirth / reincarnation\n"
+                    "  கதி             → destination / realm of rebirth (gati)\n"
+                    "  பவம்            → existence / becoming (bhava)\n\n"
+
+                    "THE THREE JEWELS:\n"
+                    "  திரிரத்தினம்    → Three Jewels (tiratana)\n"
+                    "  புத்தர்         → the Buddha — the awakened one\n"
+                    "  தம்மம்          → Dhamma — the teaching / the truth\n"
+                    "  சங்கம்          → Sangha — the community of practitioners\n\n"
+
+                    "SCRIPTURE:\n"
+                    "  திரிபிடகம்      → Tipitaka — the Pali Canon (three baskets)\n"
+                    "  சுத்த பிடகம்    → Sutta Pitaka — discourses of the Buddha\n"
+                    "  வினய பிடகம்     → Vinaya Pitaka — monastic rules\n"
+                    "  அபிதம்ம பிடகம் → Abhidhamma Pitaka — higher teaching / philosophy\n"
+                    "  நிகாயம்         → Nikāya — collection of suttas\n\n"
+
+                    "═══ SINHALA → PALI / ENGLISH GLOSSARY ═══\n\n"
+
+                    "THREE MARKS:\n"
+                    "  අනිත්‍ය (anithya)   → impermanence (anicca) — NOT craving\n"
+                    "  දුක්ඛ (dukkha)     → suffering / unsatisfactoriness\n"
+                    "  අනාත්ම (anathma)   → no-self (anattā)\n\n"
+
+                    "CRAVING AND DEFILEMENTS:\n"
+                    "  තණ්හාව (tanhawa)   → craving (taṇhā)\n"
+                    "  උපාදාන (upadana)   → clinging (upādāna)\n"
+                    "  අවිද්‍යා (avidya)  → ignorance (avijjā)\n"
+                    "  ලෝභ (lobha)        → greed\n"
+                    "  ද්වේෂ (dwesha)     → hatred / aversion (dosa)\n"
+                    "  මෝහ (moha)         → delusion\n\n"
+
+                    "LIBERATION:\n"
+                    "  නිර්වාණය (nirvanaya) → nibbāna — liberation, NOT a place\n"
+                    "  ශූන්‍යතාව (shunyata) → emptiness (suññatā)\n"
+                    "  විමුක්තිය (vimukthi)  → liberation (vimutti)\n\n"
+
+                    "MEDITATION:\n"
+                    "  සමාධිය (samadhiya)   → concentration (samādhi)\n"
+                    "  සතිය (sathiya)       → mindfulness (sati)\n"
+                    "  විදර්ශනා (vidarshana) → insight meditation (vipassanā)\n"
+                    "  සමථ (samatha)        → calm meditation\n\n"
+
+                    "ETHICS:\n"
+                    "  කර්මය (karmaya)      → karma — intentional action\n"
+                    "  ශීලය (shilaya)       → virtue / ethics (sīla)\n"
+                    "  මෛත්‍රී (maithri)    → loving-kindness (mettā)\n"
+                    "  කරුණා (karuna)       → compassion\n"
+                    "  ප්‍රඥා (pragna)      → wisdom (paññā)\n\n"
+
+                    "PATH:\n"
+                    "  ආර්ය අෂ්ටාංගික මාර්ගය → Noble Eightfold Path\n"
+                    "  සංසාරය (sansaraya)     → cycle of rebirth (saṃsāra)\n"
+                    "  පටිච්චසමුප්පාද        → dependent origination\n"
+                    "  ධර්මය (dharmaya)       → Dhamma — the teaching\n"
+                    "  ත්‍රිපිටකය             → Tipitaka — Pali Canon\n"
                 ),
             },
             {
@@ -419,7 +551,7 @@ def _translate_query_to_english(question: str) -> str:
             },
         ],
         "temperature": 0.0,
-        "max_tokens":  120,
+        "max_tokens":  150,
     }
     try:
         resp = requests.post(GROQ_URL, headers=headers, json=payload_2, timeout=20)
