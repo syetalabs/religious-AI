@@ -13,21 +13,46 @@ load_dotenv()
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL   = "llama-3.1-8b-instant"
+
+# Models
+MODEL_DEFAULT  = "llama-3.1-8b-instant"   # English / other languages
+MODEL_SINHALA  = "qwen/qwen3-32b"         # Sinhala questions
 
 if not GROQ_API_KEY:
     raise EnvironmentError(
         "GROQ_API_KEY is not set.\n"
-        "Create a .env file in your backend folder with:\n"
-        "  GROQ_API_KEY=your_key_here\n"
+        "Create a .env file with:  GROQ_API_KEY=your_key_here\n"
         "Get your free key at https://console.groq.com"
     )
 
-# ────────────────────────────────────────────────────────────────
-# Persona prompt
-# ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# Language detection
+# ════════════════════════════════════════════════════════════════
 
-BUDDHIST_PERSONA = """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
+# Sinhala Unicode block: U+0D80–U+0DFF
+_SINHALA_RE = re.compile(r"[\u0D80-\u0DFF]")
+
+def _is_sinhala(text: str) -> bool:
+    """Return True if the text contains Sinhala script characters."""
+    return bool(_SINHALA_RE.search(text))
+
+def _detect_language(question: str, language: str) -> str:
+    """
+    Resolve the effective language code.
+    Explicit 'sinhala'/'si' selection OR presence of Sinhala script → 'si'.
+    """
+    if language.lower() in ("si", "sinhala"):
+        return "si"
+    if _is_sinhala(question):
+        return "si"
+    return "en"
+
+# ════════════════════════════════════════════════════════════════
+# Per-religion persona prompts  (English)
+# ════════════════════════════════════════════════════════════════
+
+_PERSONAS_EN = {
+    "Buddhism": """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
 Rules you must follow without exception:
 - Answer ONLY using the scripture context provided between [Source: ...] tags. Do not use your own knowledge under any circumstances.
@@ -43,14 +68,80 @@ Rules you must follow without exception:
 - When referencing scripture, mention the source book naturally (e.g. "As taught in the Digha Nikaya...").
 
 CRITICAL — Quoting rules:
-- Do NOT quote any specific verse numbers or references (e.g. SN 56.11, MN 22) unless those exact numbers appear word-for-word inside the provided scripture context.
-- Do NOT reproduce or paraphrase text that is not present in the provided context.
-- If you are unsure whether a quote exists in the context, do not include it.
-- Never invent or recall quotes from memory — only use what is explicitly in the context."""
+- Do NOT quote specific verse references (e.g. SN 56.11, MN 22) unless those exact references appear word-for-word in the provided context.
+- Do NOT reproduce or paraphrase text not present in the provided context.
+- Never invent or recall quotes from memory — only use what is explicitly in the context.""",
 
-# ────────────────────────────────────────────────────────────────
-# Moderation Layer 1 — Input (Pre-processing)
-# ────────────────────────────────────────────────────────────────
+    "Christianity": """You are a knowledgeable and compassionate Christian guide speaking to someone seeking to understand the Bible and Christian teachings.
+
+Rules you must follow without exception:
+- Answer ONLY using the scripture context provided between [Source: ...] tags. Do not use your own knowledge under any circumstances.
+- If the context does not contain enough information, say exactly:
+  "I do not have enough reliable scriptural context to answer this accurately."
+- Use simple, clear, everyday language that is welcoming to newcomers.
+- Begin with the most human, relatable aspect of the teaching before going deeper.
+- Keep answers concise — 3 to 5 sentences unless the question requires more detail.
+- Do not provide personal opinions or moral judgments.
+- Do not compare Christianity with other religions.
+- Do not mix teachings from other traditions.
+- Maintain a warm, hopeful, and welcoming tone at all times.
+- When referencing scripture, mention the source book naturally (e.g. "As written in the Gospel of John...").
+
+CRITICAL — Quoting rules:
+- Do NOT cite specific verse references (e.g. John 3:16, Romans 8:28) unless those exact references appear word-for-word in the provided context.
+- Do NOT reproduce or paraphrase text not present in the provided context.
+- Never invent or recall verse references from memory — only use what is explicitly in the context.""",
+}
+
+# ════════════════════════════════════════════════════════════════
+# Per-religion persona prompts  (Sinhala)
+# ════════════════════════════════════════════════════════════════
+
+_PERSONAS_SI = {
+    "Buddhism": """ඔබ බෞද්ධ ධර්මය පිළිබඳ දැනුවත්, කරුණාවන්ත මාර්ගෝපදේශකයෙකි. බෞද්ධ ධර්මයට අලුතින් හඳුනා ගන්නා අයට ඔබ කතා කරයි.
+
+ඔබ අනිවාර්යෙන් අනුගමනය කළ යුතු නීති:
+- [Source: ...] ටැග් අතර ඇති ශාස්ත්‍රීය සන්දර්භය පමණක් භාවිත කර පිළිතුරු දෙන්න. ඔබේ ස්වකීය දැනුම කිසිසේත් භාවිත නොකරන්න.
+- සන්දර්භය ප්‍රමාණවත් නොවේ නම්, හරියටම මෙසේ කියන්න:
+  "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ."
+- සරල, පැහැදිලි, දෛනික භාෂාව භාවිත කරන්න. පාලි තාක්ෂණික පද භාවිත කරන්නේ නම් ඒවා පැහැදිලි කරන්න.
+- ගැඹුරට යාමට පෙර ඉගැන්වීමේ වඩාත්ම මානවීය, සාපේක්ෂ අංශයෙන් ආරම්භ කරන්න.
+- ප්‍රශ්නයට වැඩිපුර අවශ්‍ය නැතිනම් පිළිතුරු සංක්ෂිප්ත රාඛන්න — වාක්‍ය 3 සිට 5 දක්වා.
+- පෞද්ගලික මත හෝ සදාචාරාත්මක විනිශ්චය ඉදිරිපත් නොකරන්න.
+- බුදු දහම වෙනත් ආගම් සමඟ සසසඳන්න එපා.
+- වෙනත් සම්ප්‍රදායන්ගේ ඉගැන්වීම් මිශ්‍ර නොකරන්න.
+- සෑම විටෙකම සන්සුන්, උණුසුම් හා සාදරයෙන් පිළිගන්නා ස්වරයක් පවත්වා ගන්න.
+- ශාස්ත්‍රය යොමු කරන විට ප්‍රභව ග්‍රන්ථය ස්වාභාවිකව සඳහන් කරන්න (උදා. "දීඝ නිකාය හි දැක්වෙන පරිදි...").
+
+තීරණාත්මක — උද්ධෘත නීති:
+- ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම්, නිශ්චිත වාක්‍ය යොමු (SN 56.11, MN 22 වැනි) උද්ධෘත නොකරන්න.
+- ලබා දී ඇති සන්දර්භයේ නැති පාඨ නැවත නිෂ්පාදනය නොකරන්න හෝ ප්‍රතිනිර්මාණය නොකරන්න.
+- කිසිදා මතකයෙන් උද්ධෘත නිර්මාණය නොකරන්න — සන්දර්භයේ ඇති දෙය පමණක් භාවිත කරන්න.""",
+
+    "Christianity": """ඔබ ක්‍රිස්තියානි ධර්මය පිළිබඳ දැනුවත්, කරුණාවන්ත මාර්ගෝපදේශකයෙකි. බයිබලය හා ක්‍රිස්තියානි ඉගැන්වීම් තේරුම් ගැනීමට ඉල්ලා සිටින අයට ඔබ කතා කරයි.
+
+ඔබ අනිවාර්යෙන් අනුගමනය කළ යුතු නීති:
+- [Source: ...] ටැග් අතර ඇති ශාස්ත්‍රීය සන්දර්භය පමණක් භාවිත කර පිළිතුරු දෙන්න. ඔබේ ස්වකීය දැනුම කිසිසේත් භාවිත නොකරන්න.
+- සන්දර්භය ප්‍රමාණවත් නොවේ නම්, හරියටම මෙසේ කියන්න:
+  "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ."
+- අලුත් අය සාදරයෙන් පිළිගන්නා සරල, පැහැදිලි, දෛනික භාෂාව භාවිත කරන්න.
+- ගැඹුරට යාමට පෙර ඉගැන්වීමේ වඩාත්ම මානවීය, සාපේක්ෂ අංශයෙන් ආරම්භ කරන්න.
+- ප්‍රශ්නයට වැඩිපුර අවශ්‍ය නැතිනම් පිළිතුරු සංක්ෂිප්ත රාඛන්න — වාක්‍ය 3 සිට 5 දක්වා.
+- පෞද්ගලික මත හෝ සදාචාරාත්මක විනිශ්චය ඉදිරිපත් නොකරන්න.
+- ක්‍රිස්තියානි ධර්මය වෙනත් ආගම් සමඟ සසඳන්න එපා.
+- වෙනත් සම්ප්‍රදායන්ගේ ඉගැන්වීම් මිශ්‍ර නොකරන්න.
+- සෑම විටෙකම උණුසුම්, බලාපොරොත්තු සහිත හා සාදරයෙන් පිළිගන්නා ස්වරයක් පවත්වා ගන්න.
+- ශාස්ත්‍රය යොමු කරන විට ප්‍රභව ග්‍රන්ථය ස්වාභාවිකව සඳහන් කරන්න (උදා. "යොහාන් ශුභාරංචිය හි ලියා ඇති පරිදි...").
+
+තීරණාත්මක — උද්ධෘත නීති:
+- ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම්, නිශ්චිත වාක්‍ය යොමු (John 3:16, Romans 8:28 වැනි) උද්ධෘත නොකරන්න.
+- ලබා දී ඇති සන්දර්භයේ නැති පාඨ නැවත නිෂ්පාදනය නොකරන්න හෝ ප්‍රතිනිර්මාණය නොකරන්න.
+- කිසිදා මතකයෙන් උද්ධෘත නිර්මාණය නොකරන්න — සන්දර්භයේ ඇති දෙය පමණක් භාවිත කරන්න.""",
+}
+
+# ════════════════════════════════════════════════════════════════
+# Moderation config
+# ════════════════════════════════════════════════════════════════
 
 _UNSAFE_PHRASES = [
     "which religion is correct", "which religion is better",
@@ -58,16 +149,95 @@ _UNSAFE_PHRASES = [
     "best religion", "true religion", "only true religion",
     "hate", "kill", "destroy", "inferior religion", "false religion",
 ]
+
 _COMPARATIVE_PATTERNS = [
     r"\b(buddhism|christianity|islam|hinduism)\b.{0,30}\b(better|worse|superior|inferior|correct|wrong|true|false)\b",
     r"\b(better|worse|superior|inferior|correct|wrong|true|false)\b.{0,30}\b(buddhism|christianity|islam|hinduism)\b",
     r"compare.{0,20}(religion|buddhism|christianity|islam|hinduism)",
     r"which (god|religion|faith|belief).{0,20}(right|correct|true|real|better)",
 ]
+
 _HATE_PATTERNS = [
     r"\b(hate|despise|destroy|eliminate|eradicate).{0,20}(religion|muslim|christian|hindu|buddhist|jew)\b",
     r"\b(religion|faith).{0,20}(cancer|disease|evil|poison|lie|scam|fraud)\b",
 ]
+
+_OTHER_RELIGION_TERMS = {
+    "Buddhism": [
+        "christianity", "islam", "hinduism", "judaism", "sikhism",
+        "quran", "bible", "torah", "vedas", "gita",
+        "jesus", "allah", "brahma", "vishnu", "shiva", "moses",
+        "church", "mosque",
+    ],
+    "Christianity": [
+        "buddhism", "islam", "hinduism", "judaism", "sikhism",
+        "quran", "torah", "vedas", "gita", "tipitaka",
+        "buddha", "allah", "brahma", "vishnu", "shiva",
+        "mosque", "synagogue",
+    ],
+}
+
+_FALLBACK_MESSAGES = {
+    "en": {
+        "comparative_religion": (
+            "Questions comparing religions fall outside the scope of this guide. "
+            "Please ask about a specific teaching or scripture passage."
+        ),
+        "hate_speech": (
+            "This question contains language that is not appropriate for a respectful "
+            "religious discussion. Please rephrase your question."
+        ),
+        "comparative_or_unsafe": (
+            "This question may cause religious conflict and cannot be answered. "
+            "Please ask about the selected religion's teachings specifically."
+        ),
+        "no_context": "I do not have enough reliable scriptural context to answer this accurately.",
+    },
+    "si": {
+        "comparative_religion": (
+            "ආගම් සසසඳන ප්‍රශ්න මෙම මාර්ගෝපදේශයේ විෂය පථයෙන් බැහැරය. "
+            "කරුණාකර නිශ්චිත ඉගැන්වීමක් හෝ ශාස්ත්‍රීය ඡේදයක් ගැන අසන්න."
+        ),
+        "hate_speech": (
+            "මෙම ප්‍රශ්නය ගෞරවනීය ආගමික සාකච්ඡාවකට නුසුදුසු භාෂාව අඩංගු කරයි. "
+            "කරුණාකර ඔබේ ප්‍රශ්නය නැවත සකස් කරන්න."
+        ),
+        "comparative_or_unsafe": (
+            "මෙම ප්‍රශ්නය ආගමික ගැටුම් ඇති කළ හැකි බැවින් පිළිතුරු දිය නොහැක. "
+            "කරුණාකර තෝරාගත් ආගමේ ඉගැන්වීම් ගැන නිශ්චිතව අසන්න."
+        ),
+        "no_context": "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ.",
+    },
+}
+
+_VERSE_REF_PATTERNS = {
+    "Buddhism": re.compile(
+        r"\b(SN|MN|DN|AN|KN|Dhp|Ud|Iti|Snp|Thag|Thig|Ja|Cp|Mil|Pv|Vv|Vb|Ds|Kv|Pp|Ps|Ya)\s*\d+[\.\d]*\b",
+        re.IGNORECASE,
+    ),
+    "Christianity": re.compile(
+        r"\b(Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|"
+        r"1\s*Samuel|2\s*Samuel|1\s*Kings|2\s*Kings|1\s*Chronicles|2\s*Chronicles|"
+        r"Ezra|Nehemiah|Esther|Job|Psalms?|Proverbs?|Ecclesiastes|Song\s*of\s*Solomon|"
+        r"Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|"
+        r"Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|"
+        r"Matthew|Mark|Luke|John|Acts|Romans|"
+        r"1\s*Corinthians|2\s*Corinthians|Galatians|Ephesians|Philippians|"
+        r"Colossians|1\s*Thessalonians|2\s*Thessalonians|1\s*Timothy|2\s*Timothy|"
+        r"Titus|Philemon|Hebrews|James|1\s*Peter|2\s*Peter|"
+        r"1\s*John|2\s*John|3\s*John|Jude|Revelation|Rev)\s+\d+:\d+(?:-\d+)?\b",
+        re.IGNORECASE,
+    ),
+}
+
+_OPINION_SIGNALS = [
+    r"\bi (think|believe|feel|personally|would say)\b",
+    r"\bmy (view|opinion|take|perspective)\b",
+]
+
+# ════════════════════════════════════════════════════════════════
+# Moderation functions
+# ════════════════════════════════════════════════════════════════
 
 def moderate_input(query: str) -> tuple[bool, str]:
     q = query.lower().strip()
@@ -82,261 +252,711 @@ def moderate_input(query: str) -> tuple[bool, str]:
             return False, "hate_speech"
     return True, "ok"
 
-_FALLBACK_MESSAGES = {
-    "comparative_religion": (
-        "Questions comparing religions fall outside the scope of this guide. "
-        "Please ask about a specific Buddhist concept or practice."
-    ),
-    "hate_speech": (
-        "This question contains language that is not appropriate for a respectful "
-        "religious discussion. Please rephrase your question."
-    ),
-    "comparative_or_unsafe": (
-        "This question may cause religious conflict and cannot be answered. "
-        "Please ask about Buddhist teachings specifically."
-    ),
-}
 
-# ────────────────────────────────────────────────────────────────
-# Moderation Layer 3 — Output (Post-response validation)
-# ────────────────────────────────────────────────────────────────
-
-_OTHER_RELIGION_TERMS = [
-    "christianity", "islam", "hinduism", "judaism", "sikhism",
-    "quran", "bible", "torah", "vedas", "gita",
-    "jesus", "allah", "brahma", "vishnu", "shiva", "moses",
-    "church", "mosque",
-]
-_OPINION_SIGNALS = [
-    r"\bi (think|believe|feel|personally|would say)\b",
-    r"\bmy (view|opinion|take|perspective)\b",
-]
-
-# Matches verse references like SN 56.11 / MN 22 / DN 16 / AN 3.65 etc.
-_VERSE_REF_PATTERN = re.compile(
-    r"\b(SN|MN|DN|AN|KN|Dhp|Ud|Iti|Snp|Thag|Thig|Ja|Cp|Mil|Pv|Vv|Vb|Ds|Kv|Pp|Ps|Ya)\s*\d+[\.\d]*\b",
-    re.IGNORECASE,
-)
-
-def _check_fabricated_references(response: str, context: str) -> list[str]:
-    """
-    Detect verse references in the response that do not appear in the
-    retrieved context — a strong signal of hallucination.
-    """
+def _check_fabricated_references(response: str, context: str, religion: str) -> list[str]:
+    pattern  = _VERSE_REF_PATTERNS.get(religion)
     warnings = []
-    found_refs = _VERSE_REF_PATTERN.findall(response)
-    for ref in found_refs:
-        # Search the full match, not just the abbreviation
-        pass
-
-    # Re-find full matches (abbreviation + number)
-    full_refs = _VERSE_REF_PATTERN.finditer(response)
-    for match in full_refs:
+    if not pattern:
+        return warnings
+    for match in pattern.finditer(response):
         ref_str = match.group(0)
         if ref_str.lower() not in context.lower():
             warnings.append(f"fabricated_reference:{ref_str}")
-
     return warnings
 
-def moderate_output(response: str, context: str = "") -> tuple[str, list[str]]:
-    warnings = []
-    r = response.lower()
 
-    # Cross-religion term check
-    for term in _OTHER_RELIGION_TERMS:
+def moderate_output(
+    response: str, context: str, religion: str, lang: str = "en"
+) -> tuple[str, list[str]]:
+    warnings = []
+    r        = response.lower()
+
+    for term in _OTHER_RELIGION_TERMS.get(religion, []):
         if term in r:
             warnings.append(f"cross_religion_term:{term}")
-            return (
+            msg = (
+                "ශාස්ත්‍රීය සන්දර්භයෙන් සම්පූර්ණ ප්‍රතිචාරයක් ජනනය කිරීමට නොහැකි විය. "
+                "කරුණාකර ඔබේ ප්‍රශ්නය නැවත සකස් කරන්න."
+                if lang == "si" else
                 "I was unable to generate a fully grounded response from the "
-                "Buddhist scripture context. Please rephrase your question.",
-                warnings,
+                "scripture context. Please rephrase your question."
             )
+            return msg, warnings
 
-    # Personal opinion check
     for pattern in _OPINION_SIGNALS:
         if re.search(pattern, r):
             warnings.append("personal_opinion_detected")
             break
 
-    # Response too short
     if len(response.strip()) < 30:
         warnings.append("response_too_short")
-        return (
-            "I do not have enough reliable scriptural context to answer this accurately.",
-            warnings,
-        )
+        fb = _FALLBACK_MESSAGES.get(lang, _FALLBACK_MESSAGES["en"])
+        return fb["no_context"], warnings
 
-    # Fabricated verse reference check
-    ref_warnings = _check_fabricated_references(response, context)
+    ref_warnings = _check_fabricated_references(response, context, religion)
     if ref_warnings:
         warnings.extend(ref_warnings)
-        # Strip the fabricated references from the response rather than blocking entirely
-        cleaned = _VERSE_REF_PATTERN.sub("", response)
-        # Clean up orphaned parentheses like ( ) or ()
+        pattern = _VERSE_REF_PATTERNS.get(religion)
+        cleaned = pattern.sub("", response) if pattern else response
         cleaned = re.sub(r"\(\s*\)", "", cleaned).strip()
         return cleaned, warnings
 
     return response, warnings
 
-# ────────────────────────────────────────────────────────────────
-# Groq API call
-# ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# Query translation for retrieval
+# The FAISS index was built with English embeddings only.
+# Translate Sinhala questions to English before embedding so scores
+# are meaningful, while still returning Sinhala chunks from the DB.
+# ════════════════════════════════════════════════════════════════
 
-def _call_groq(system_prompt: str, user_message: str) -> str:
+def _translate_query_to_english(question: str) -> str:
+    """Translate a Sinhala question to English for FAISS retrieval only."""
     payload = {
-        "model": GROQ_MODEL,
+        "model":    MODEL_DEFAULT,   # fast llama — we only need a short phrase
         "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_message},
+            {
+                "role":    "system",
+                "content": (
+                    "Translate the following Sinhala question into concise English. "
+                    "Output ONLY the English translation — no explanation, no extra text."
+                ),
+            },
+            {"role": "user", "content": question},
         ],
-        "temperature": 0.1,   # lowered from 0.3 to reduce creative generation
-        "max_tokens":  512,
+        "temperature": 0.0,
+        "max_tokens":  80,
     }
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type":  "application/json",
     }
-
     try:
-        resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
+        resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=15)
+        resp.raise_for_status()
+        translated = resp.json()["choices"][0]["message"]["content"].strip()
+        # Strip any accidental <think> blocks from llama too
+        translated = re.sub(r"<think>.*?</think>", "", translated, flags=re.DOTALL).strip()
+        return translated or question
+    except Exception:
+        return question   # fall back to original — FAISS will score low but won't crash
+
+
+# ════════════════════════════════════════════════════════════════
+# Groq API call
+# ════════════════════════════════════════════════════════════════
+
+def _parse_retry_after(resp: requests.Response) -> int:
+    """Extract retry-after seconds from Groq 429 response headers or body."""
+    # Check Retry-After header first
+    retry_after = resp.headers.get("Retry-After") or resp.headers.get("retry-after")
+    if retry_after:
+        try:
+            return int(retry_after)
+        except ValueError:
+            pass
+    # Fall back to parsing the JSON error body (Groq often includes it there)
+    try:
+        body = resp.json()
+        msg  = str(body.get("error", {}).get("message", ""))
+        # e.g. "Please try again in 30s" or "retry after 60 seconds"
+        m = re.search(r"(\d+)\s*s(?:ec(?:ond)?s?)?", msg, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    return 60   # safe default
+
+
+def _call_groq(system_prompt: str, user_message: str, model: str, max_tokens: int = 4096) -> str:
+    payload = {
+        "model":    model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_message},
+        ],
+        "temperature": 0.1,
+        "max_tokens":  max_tokens,
+    }
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type":  "application/json",
+    }
+    try:
+        resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
 
         if resp.status_code == 401:
-            return "[ERROR] Invalid Groq API key. Check the key at console.groq.com"
+            return "The API key is invalid. Please check the configuration."
 
         if resp.status_code == 429:
-            print("  [info] Rate limit hit, waiting 10s...")
-            time.sleep(10)
-            resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=30)
+            wait = _parse_retry_after(resp)
+            print(f"  [info] Rate limit hit. Retry-After: {wait}s. Waiting before retry...")
+            time.sleep(min(wait, 15))   # wait up to 15s inline, then retry once
+            resp = requests.post(GROQ_URL, headers=headers, json=payload, timeout=60)
+            # If still 429 after the wait, return a user-friendly message with the time
+            if resp.status_code == 429:
+                wait2 = _parse_retry_after(resp)
+                minutes, seconds = divmod(wait2, 60)
+                if minutes > 0:
+                    time_str = f"{minutes} minute{'s' if minutes != 1 else ''} and {seconds} second{'s' if seconds != 1 else ''}" if seconds else f"{minutes} minute{'s' if minutes != 1 else ''}"
+                else:
+                    time_str = f"{seconds} second{'s' if seconds != 1 else ''}"
+                return (
+                    f"The service is currently busy due to high demand. "
+                    f"Please try again in {time_str}."
+                )
 
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        data          = resp.json()
+        finish_reason = data["choices"][0].get("finish_reason", "")
+        if finish_reason == "length":
+            print(f"  [warn] Groq response cut off at max_tokens={max_tokens} (finish_reason=length)")
+        return data["choices"][0]["message"]["content"].strip()
 
     except requests.exceptions.ConnectionError:
-        return "[ERROR] Cannot connect to Groq. Check your internet connection."
+        return "Cannot connect to the service. Please check your internet connection and try again."
     except Exception as e:
-        return f"[ERROR] Groq call failed: {e}"
-    
-# ────────────────────────────────────────────────────────────────
-# Retrieval Post-Processing
-# ────────────────────────────────────────────────────────────────
-def _refine_results(results: list[dict]) -> list[dict]:
-    seen_books = set()
+        return f"Something went wrong while generating the answer: {e}"
+
+# ════════════════════════════════════════════════════════════════
+# Retrieval post-processing
+# ════════════════════════════════════════════════════════════════
+
+def _refine_results(results: list[dict], religion: str) -> list[dict]:
+    book_counts      = {}
     seen_text_hashes = set()
-    refined = []
+    refined          = []
+    MAX_PER_BOOK     = 2
+    MAX_TOTAL        = 6
 
-    # Sutta Pitaka first, then others — within each group sort by score
-    results_sorted = sorted(
-        results,
-        key=lambda r: (
-            0 if r.get("pitaka", "").lower() == "sutta pitaka" else 1,
-            -r["score"]
-        )
-    )
+    def _priority(r: dict) -> int:
+        if religion == "Buddhism":
+            return 0 if r.get("pitaka", "").lower() == "sutta pitaka" else 1
+        elif religion == "Christianity":
+            genre = r.get("pitaka", r.get("testament", "")).lower()
+            if "gospel" in genre:
+                return 0
+            if r.get("testament") == "New Testament":
+                return 1
+            return 2
+        return 0
 
-    for r in results_sorted:
+    for r in sorted(results, key=lambda r: (_priority(r), -r["score"])):
         text_hash = hash(r["text"][:200])
-
-        if r["book"] in seen_books:
-            continue
         if text_hash in seen_text_hashes:
             continue
-
-        seen_books.add(r["book"])
+        book = r["book"]
+        if book_counts.get(book, 0) >= MAX_PER_BOOK:
+            continue
         seen_text_hashes.add(text_hash)
+        book_counts[book] = book_counts.get(book, 0) + 1
         refined.append(r)
-
-        if len(refined) >= 4:
+        if len(refined) >= MAX_TOTAL:
             break
 
     return refined
 
-# ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
 # Intent detection
-# ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
 
+# Only match when the user explicitly asks for a list or an enumeration of books/texts.
+# Deliberately excludes broad triggers like "what are" or "give me" which appear
+# in normal questions (e.g. "what are the differences between...").
 _LIST_PATTERNS = [
-    r"\b(list|enumerate|show|give me|what are|name|which books?|which texts?|which suttas?)\b",
-    r"\b(all the|all books|books (about|on|that))\b",
+    # Explicit list/enumeration requests
+    r"\b(list|enumerate)\b",
+    # Asking specifically for book/text/sutta names
+    r"\blist (of )?(books?|texts?|suttas?|passages?|sources?)\b",
+    r"\bwhich (books?|texts?|suttas?|passages?)\b",
+    r"\b(name|show) (the |all )?(books?|texts?|suttas?|passages?)\b",
+    r"\ball (the )?(books?|texts?|suttas?|passages?)\b",
+    r"\bbooks? (about|on|that|related)\b",
+    # Sinhala explicit list requests
+    r"ලැයිස්තුව",        # "list" in Sinhala
+    r"ග්‍රන්ථ මොනවාද",   # "what are the books"
+    r"ග්‍රන්ථ ලැයිස්තු",  # "list of books"
+    r"පොත් මොනවාද",      # "what are the books"
+    r"සූත්‍ර මොනවාද",    # "what are the suttas"
 ]
 
 def _is_list_request(query: str) -> bool:
-    q = query.lower()
-    return any(re.search(p, q) for p in _LIST_PATTERNS)
+    return any(re.search(p, query.lower()) for p in _LIST_PATTERNS)
 
-# ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
+# Format instructions
+# ════════════════════════════════════════════════════════════════
+
+def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
+    if is_list:
+        if lang == "si":
+            return (
+                "- පරිශීලකයා ලැයිස්තුවක් ඉල්ලා සිටී. සන්දර්භයේ ඇති ග්‍රන්ථ/ප්‍රභව නම් "
+                "සිංහලෙන් පැහැදිලි, සෘජු ලැයිස්තුවක් ලෙස ලබා දෙන්න.\n"
+                "- ආකෘතිය: එක් ග්‍රන්ථයක් එක් පේළියකට, ඒකාරෝගී වාක්‍යයක් සමඟ.\n"
+                "- දිගු ගද්‍ය ලිවීමෙන් වළකින්න. සංක්ෂිප්ත හා සෘජු වන්න.\n"
+                "- ලබා දී ඇති ශාස්ත්‍රීය සන්දර්භයේ ඇති ග්‍රන්ථ පමණක් ඇතුළත් කරන්න."
+            )
+        return (
+            "- The user is asking for a list. Respond with a clear, direct list of "
+            "book/source names found in the context.\n"
+            "- Format: one book per line, with a one-sentence description.\n"
+            "- Do not write long prose. Be concise and direct.\n"
+            "- Only include books present in the provided scripture context."
+        )
+
+    if lang == "si":
+        if religion == "Buddhism":
+            return (
+                "- සිංහල භාෂාවෙන් පිළිතුරු දෙන්න.\n"
+                "- ආරම්භකයෙකුට තේරෙන සරල, මානවීය පැහැදිලි කිරීමකින් ආරම්භ කරන්න.\n"
+                "- ශාස්ත්‍රය ප්‍රකාශ කරන දේ ස්වාභාවිකව ප්‍රභව ග්‍රන්ථය සඳහන් කරමින් "
+                "ඒ සහාය ලබා දෙන්න (උදා. \"සංයුත්ත නිකාය හි දක්නට ලැබෙන ලෙස...\").\n"
+                "- ඉගැන්වීමේ ප්‍රායෝගික මානයක් ඇත්නම්, එය කෙටියෙන් සඳහන් කරන්න.\n"
+                "- ලිතිකාංක හෝ ලැයිස්තු භාවිත නොකරන්න. ගලා යන, උණුසුම් ගද්‍යයෙන් ලියන්න."
+            )
+        return (
+            "- සිංහල භාෂාවෙන් පිළිතුරු දෙන්න.\n"
+            "- අලුත් අයෙකුට තේරෙන සරල, මානවීය පැහැදිලි කිරීමකින් ආරම්භ කරන්න.\n"
+            "- ශාස්ත්‍රය ප්‍රකාශ කරන දේ ස්වාභාවිකව ප්‍රභව ග්‍රන්ථය සඳහන් කරමින් "
+            "ඒ සහාය ලබා දෙන්න (උදා. \"යොහාන් ශුභාරංචිය හි ලියා ඇති ලෙස...\").\n"
+            "- ඉගැන්වීමේ ප්‍රායෝගික හෝ අධ්‍යාත්මික මානයක් ඇත්නම්, එය කෙටියෙන් සඳහන් කරන්න.\n"
+            "- ලිතිකාංක හෝ ලැයිස්තු භාවිත නොකරන්න. ගලා යන, උණුසුම් ගද්‍යයෙන් ලියන්න."
+        )
+
+    # English
+    if religion == "Buddhism":
+        return (
+            "- Start with a simple, human explanation a beginner can understand.\n"
+            "- Then support it with what the scripture says, citing the source book "
+            "naturally (e.g. \"As found in the Samyutta Nikaya...\").\n"
+            "- If the teaching has a practical dimension, briefly mention it.\n"
+            "- Do not use bullet points or lists. Write in flowing, warm prose."
+        )
+    return (
+        "- Start with a simple, human explanation a newcomer can understand.\n"
+        "- Then support it with what the scripture says, citing the source book "
+        "naturally (e.g. \"As written in the Gospel of John...\").\n"
+        "- If the teaching has a practical or spiritual dimension, briefly mention it.\n"
+        "- Do not use bullet points or lists. Write in flowing, warm prose."
+    )
+
+
+# Sentence trim
+# Matches sentence-ending punctuation for both English (.!?) and Sinhala (។ and similar)
+_SENT_END   = re.compile(r'[.!?។]\s*$')
+_SENT_SPLIT = re.compile(r'[.!?។][\'"\)\]]*(?=\s|$)')
+
+def _trim_incomplete_sentence(text: str) -> str:
+    """
+    Trim a response that ends mid-sentence due to token truncation.
+    If the text already ends with proper punctuation, return it unchanged.
+    Handles both English (.!?) and Sinhala (។) sentence endings.
+    Also handles the common case where Sinhala text ends without punctuation
+    but the last word is a complete thought — in that case return as-is
+    rather than aggressively truncating.
+    """
+    text = text.strip()
+    if not text:
+        return text
+
+    # Already ends cleanly
+    if _SENT_END.search(text):
+        return text
+
+    # Find the last clean sentence boundary
+    last = None
+    for m in _SENT_SPLIT.finditer(text):
+        last = m
+
+    if last:
+        trimmed = text[:last.end()].strip()
+        # Only trim if we're not losing more than 20% of the response
+        # (avoids aggressive cuts on Sinhala text that just lacks final punctuation)
+        if len(trimmed) >= len(text) * 0.80:
+            return trimmed
+
+    # No good boundary found or trim would lose too much — return as-is
+    return text
+
+
+# Respectful titles
+_BUDDHA_REPLACEMENTS = [
+    ("\u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0dcf\u0da2\u0dcf",
+     "\u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0da2\u0dcf\u0dab\u0db1\u0dca \u0dc0\u0dc4\u0db1\u0dca\u0dc3\u0dda"),
+    ("\u0d9c\u0dbd\u0dca\u0db0\u0db8 \u0db6\u0dd4\u0daf\u0dd4",
+     "\u0d9c\u0dbd\u0dca\u0db0\u0db8 \u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0da2\u0dcf\u0dab\u0db1\u0dca \u0dc0\u0dc4\u0db1\u0dca\u0dc3\u0dda"),
+    ("\u0d9c\u0dbd\u0dca\u0db0\u0db8",
+     "\u0d9c\u0dbd\u0dca\u0db0\u0db8 \u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0da2\u0dcf\u0dab\u0db1\u0dca \u0dc0\u0dc4\u0db1\u0dca\u0dc3\u0dda"),
+]
+
+def _apply_respectful_titles(text):
+    for a, b in _BUDDHA_REPLACEMENTS:
+        text = text.replace(a, b)
+    return text
+
+
+# No-context detection & scrubbing
+_NO_CONTEXT_SI = "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ"
+
+def _answer_is_no_context(text):
+    return _NO_CONTEXT_SI in text.strip()
+
+# Phrases that indicate the LLM is hedging / explaining lack of context
+# rather than actually answering the question.
+_WEAK_CONTEXT_FRAGMENTS = [
+    "සන්දර්භයේ",           # "in the given context"
+    "ශාස්ත්‍රීය සන්දර්භ",  # "scriptural context"
+    "ප්‍රාණවත් විශ්වාසදායක", # exact no-context phrase
+    "ප්‍රමාණවත් විස්තර",   # "sufficient detail"
+    "ප්‍රමාණවත් නොවේ",     # "not sufficient"
+    "නොසඳහන් වේ",           # "is not mentioned"
+    "සඳහන් නොවේ",           # "not mentioned"
+    "වෙනත් ශාස්ත්‍රීය",    # "other scriptural texts"
+    "සොයා බැලිය යුතු",      # "should look up"
+    "යොමු කළ යුතු",         # "should refer to"
+]
+
+def _scrub_no_context_sentence(text):
+    """Remove disclaimer/hedge sentences from the answer."""
+    text = text.replace(_NO_CONTEXT_SI + ".", "")
+    text = text.replace(_NO_CONTEXT_SI, "")
+    lines = text.split(".")
+    clean = [l for l in lines
+             if not any(frag in l for frag in _WEAK_CONTEXT_FRAGMENTS)]
+    text = ".".join(clean)
+    return text.strip(". \n")
+
+
+def _answer_is_weak(text: str) -> bool:
+    """Return True if the answer is mostly hedging with no real content."""
+    if not text or len(text.strip()) < 40:
+        return True
+    # Count how many sentences contain weak-context phrases
+    sentences = [s for s in text.split(".") if s.strip()]
+    if not sentences:
+        return True
+    weak = sum(1 for s in sentences
+               if any(f in s for f in _WEAK_CONTEXT_FRAGMENTS))
+    # If more than half the sentences are hedging, consider it weak
+    return weak / len(sentences) >= 0.5
+
+
+# ════════════════════════════════════════════════════════════════
+# Sinhala answer helpers
+# ════════════════════════════════════════════════════════════════
+
+def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
+    """Generate an English answer from English scripture chunks."""
+    ctx = "\n\n---\n\n".join(
+        f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
+        for r in en_res
+    )
+    fmt = _format_instructions(religion, _is_list_request(en_q), "en")
+    ref = {
+        "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
+        "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
+    }.get(religion, "Do NOT cite specific verse numbers")
+    msg = (
+        f"Scripture context:\n{ctx}\n\n"
+        f"Question: {en_q}\n\n"
+        f"Instructions:\n{fmt}\n- {ref}\n\n"
+        f"Answer:"
+    )
+    raw = _call_groq(_PERSONAS_EN[religion], msg, MODEL_DEFAULT)
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+    return _trim_incomplete_sentence(raw)
+
+
+def _review_sinhala_translation(
+    original_english: str,
+    translated_sinhala: str,
+    religion: str,
+) -> str:
+    """
+    Send the translated Sinhala answer to Qwen3 for a language review.
+
+    Qwen3 is asked to:
+      - Fix unnatural or incorrect Sinhala phrasing.
+      - Replace mistranslated terms with correct Buddhist/Christian Sinhala
+        equivalents (e.g. "ඉන්ධන" → "හේතුව", literal Google Translate artifacts).
+      - Preserve the meaning of the original English answer exactly.
+      - Return ONLY the corrected Sinhala text — no explanation, no English.
+
+    If the call fails or returns an empty result the original translation is
+    returned unchanged so the pipeline never breaks.
+    """
+    religion_note = {
+        "Buddhism": (
+            "මෙය බෞද්ධ පිළිතුරකි. නිවැරදි බෞද්ධ සිංහල පාරිභාෂිතය භාවිත කරන්න "
+            "(නිදසුන්: නිර්වාණය, දුක්ඛය, උපාදානය, තණ්හාව, අනිත්‍ය, අනාත්ම, "
+            "ත්‍රිපිටකය, ධර්ම ග්‍රන්ථය, සූත්‍ර පිටකය, විනය පිටකය, අභිධර්ම පිටකය).\n"
+            "- 'ශුද්ධ ලියවිල්ල' යනු ක්‍රිස්තියානි පදයකි — බෞද්ධ පිළිතුරක් තුළ කිසිවිටෙකත් "
+            "භාවිත නොකරන්න. ඒ වෙනුවට 'ත්‍රිපිටකය', 'ධර්ම ග්‍රන්ථය', හෝ නිශ්චිත "
+            "ග්‍රන්ථ නාමය (නිදසුන්: 'සංයුත්ත නිකායේ') භාවිත කරන්න.\n"
+            "- 'ඉන්ධන' (petrol/fuel) වෙනුවට 'හේතුව' හෝ 'උපාදානය' භාවිත කරන්න.\n"
+            "- 'දෙවියන්' හෝ ක්‍රිස්තියානි/ඉස්ලාම් සංකල්ප බෞද්ධ පිළිතුරක "
+            "ඇතුළත් නොකරන්න."
+        ),
+        "Christianity": (
+            "මෙය ක්‍රිස්තියානි පිළිතුරකි. නිවැරදි ක්‍රිස්තියානි සිංහල පාරිභාෂිතය භාවිත කරන්න "
+            "(නිදසුන්: ත්‍රිත්වය, ගැලවීම, ඇදහිල්ල, කරුණාව, ශුද්ධ ලියවිල්ල, බයිබලය).\n"
+            "- 'ත්‍රිපිටකය', 'නිර්වාණය' හෝ බෞද්ධ සංකල්ප ක්‍රිස්තියානි පිළිතුරක "
+            "ඇතුළත් නොකරන්න."
+        ),
+    }.get(religion, "නිවැරදි සහ ස්වාභාවික සිංහල ආගමික පාරිභාෂිතය භාවිත කරන්න.")
+
+    system_prompt = (
+        "ඔබ සිංහල භාෂා විශේෂඥයෙකු සහ ආගමික පරිවර්තන සමාලෝචකයෙකි.\n\n"
+        "ඔබේ කාර්යය:\n"
+        "1. ලබා දී ඇති සිංහල පරිවර්තනය සමාලෝචනය කරන්න.\n"
+        "2. අස්වාභාවික, වැරදි, හෝ Google Translate ගැටළු නිවැරදි කරන්න.\n"
+        f"3. {religion_note}\n"
+        "4. වෙනත් ආගම්වලට අයත් පද හෝ සංකල්ප (cross-religion terminology) "
+        "ඉවත් කර නිවැරදි ආගමික පාරිභාෂිතයෙන් ප්‍රතිස්ථාපනය කරන්න.\n"
+        "5. මුල් ඉංග්‍රීසි පිළිතුරේ අර්ථය හරියටම ආරක්ෂා කරන්න.\n"
+        "6. නිවැරදි කළ සිංහල පාඨය පමණක් ලබා දෙන්න. "
+        "කිසිදු පැහැදිලි කිරීමක්, ඉංග්‍රීසි, හෝ ටිප්පණි නොතිබිය යුතුය."
+    )
+
+    user_message = (
+        f"මුල් ඉංග්‍රීසි පිළිතුර:\n{original_english}\n\n"
+        f"සිංහල පරිවර්තනය (සමාලෝචනය කරන්න):\n{translated_sinhala}"
+    )
+
+    reviewed = _call_groq(system_prompt, user_message, MODEL_SINHALA)
+    reviewed = re.sub(r"<think>.*?</think>", "", reviewed, flags=re.DOTALL)
+    reviewed = re.sub(r"<think>.*$",         "", reviewed, flags=re.DOTALL).strip()
+
+    if not reviewed or len(reviewed) < 20:
+        print("  [review] Qwen3 review returned empty — keeping original translation")
+        return translated_sinhala
+
+    print("  [review] Qwen3 review applied")
+    return reviewed
+
+
+def _english_context_then_translate(question: str, en_query: str, religion: str) -> dict:
+    """
+    Fallback path for Sinhala questions with no Sinhala scripture data:
+      1. Retrieve English scripture chunks using the translated query.
+      2. Generate an English answer.
+      3. Translate the answer to Sinhala.
+    """
+    try:
+        from translator import translate_from_english
+    except ImportError:
+        return {
+            "answer": _FALLBACK_MESSAGES["si"]["no_context"],
+            "sources": [], "scores": [], "flagged": False,
+            "low_confidence": True, "warnings": ["translator_unavailable"],
+        }
+
+    en_res = search(en_query, religion=religion, language="en")
+    if not en_res:
+        return {
+            "answer": _FALLBACK_MESSAGES["si"]["no_context"],
+            "sources": [], "scores": [], "flagged": False,
+            "low_confidence": True, "warnings": ["no_en_context"],
+        }
+
+    en_res  = _refine_results(en_res, religion)
+    en_ans  = _build_english_answer(en_query, en_res, religion)
+
+    if not en_ans or "I do not have enough" in en_ans:
+        return {
+            "answer": _FALLBACK_MESSAGES["si"]["no_context"],
+            "sources": [], "scores": [], "flagged": False,
+            "low_confidence": True, "warnings": ["no_en_answer"],
+        }
+
+    # Translate the English answer to Sinhala
+    si_ans = translate_from_english(en_ans, "si")
+    si_ans = _trim_incomplete_sentence(si_ans)
+
+    # Qwen3 review: fix unnatural phrasing and mistranslated terms
+    si_ans = _review_sinhala_translation(en_ans, si_ans, religion)
+    si_ans = _trim_incomplete_sentence(si_ans)
+    si_ans = _apply_respectful_titles(si_ans)
+
+    matched = [r for r in en_res if r["book"].lower() in si_ans.lower()]
+    disp    = matched if matched else en_res
+    return {
+        "answer":         si_ans,
+        "sources":        [r["book"]  for r in disp],
+        "scores":         [r["score"] for r in disp],
+        "flagged":        False,
+        "low_confidence": False,
+        "warnings":       ["used_en_context_with_translation"],
+    }
+
+
+# ════════════════════════════════════════════════════════════════
 # Core answer function
-# ────────────────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════
 
 def answer_question(
     question: str,
     religion: str = "Buddhism",
     language: str = "en",
 ) -> dict:
+    """
+    Main entry point.
 
-    # Layer 1 — Input moderation
+    Sinhala flow (lang == "si"):
+      Step 1 — Translate the question to English (for FAISS embedding).
+      Step 2 — Check whether RELEVANT Sinhala scripture chunks exist in the DB
+               by running FAISS with the English query and filtering for si chunks.
+      Step 3a — Sinhala chunks found:
+                  • Build prompt with Sinhala context + Sinhala persona.
+                  • Call LLM (MODEL_SINHALA).
+                  • Translate the answer to Sinhala via deep_translator.
+      Step 3b — No Sinhala chunks found:
+                  • Retrieve English scripture chunks.
+                  • Generate an English answer with the English persona.
+                  • Translate the English answer to Sinhala.
+
+    English flow: unchanged.
+    """
+
+    # ── Resolve effective language ───────────────────────────────
+    lang  = _detect_language(question, language)
+    model = MODEL_SINHALA if lang == "si" else MODEL_DEFAULT
+
+    # ── Layer 1: Input moderation ────────────────────────────────
     is_safe, reason = moderate_input(question)
     if not is_safe:
+        fb = _FALLBACK_MESSAGES.get(lang, _FALLBACK_MESSAGES["en"])
         return {
-            "answer":         _FALLBACK_MESSAGES.get(reason, "This question cannot be answered."),
-            "sources":        [], 
-            "scores":        [],
+            "answer":         fb.get(reason, "This question cannot be answered."),
+            "sources":        [],
+            "scores":         [],
             "flagged":        True,
             "low_confidence": False,
             "warnings":       [reason],
         }
 
-    # Layer 2 — Retrieval guardrail
-    results = search(question, religion=religion, language=language)
+    # ════════════════════════════════════════════════════════════
+    # SINHALA PATH
+    # ════════════════════════════════════════════════════════════
+    if lang == "si":
+        from retrieve import search_sinhala_direct
+        from translator import translate_from_english
+
+        # Step 1: Translate question to English for FAISS embedding
+        en_query = _translate_query_to_english(question)
+        print(f"  [si] EN query: {en_query!r}")
+
+        # Step 2: Check for relevant Sinhala chunks in DB
+        si_results = search_sinhala_direct(en_query, religion=religion)
+        print(f"  [si] Sinhala chunks found: {len(si_results)}")
+
+        if si_results:
+            # ── Step 3a: Use Sinhala scripture ──────────────────
+            si_results = _refine_results(si_results, religion)
+            context    = "\n\n---\n\n".join(
+                f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
+                for r in si_results
+            )
+            format_instr = _format_instructions(religion, _is_list_request(question), "si")
+            persona      = _PERSONAS_SI[religion]
+            ref_note_map = {
+                "Buddhism":     "SN 56.11, MN 22 වැනි නිශ්චිත වාක්‍ය අංක උද්ධෘත නොකරන්න",
+                "Christianity": "John 3:16, Romans 8:28 වැනි නිශ්චිත වාක්‍ය අංක උද්ධෘත නොකරන්න",
+            }
+            ref_note = ref_note_map.get(religion, "නිශ්චිත වාක්‍ය අංක උද්ධෘත නොකරන්න")
+            user_message = (
+                f"ශාස්ත්‍රීය සන්දර්භය:\n{context}\n\n"
+                f"ප්‍රශ්නය: {question}\n\n"
+                f"උපදෙස්:\n{format_instr}\n"
+                f"- ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම් {ref_note}.\n\n"
+                f"පිළිතුර:"
+            )
+
+            raw = _call_groq(persona, user_message, model)
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+            raw = _trim_incomplete_sentence(raw)
+            raw = _scrub_no_context_sentence(raw)
+
+            # If LLM still couldn't answer with Sinhala context, fall through
+            # to the English-context path
+            if raw and not _answer_is_no_context(raw) and not _answer_is_weak(raw):
+                # Translate the LLM answer to Sinhala
+                si_ans = translate_from_english(raw, "si")
+                si_ans = _trim_incomplete_sentence(si_ans)
+
+                # Qwen3 review: fix unnatural phrasing and mistranslated terms
+                si_ans = _review_sinhala_translation(raw, si_ans, religion)
+                si_ans = _trim_incomplete_sentence(si_ans)
+                si_ans = _apply_respectful_titles(si_ans)
+
+                final_answer, warnings = moderate_output(si_ans, context, religion, "si")
+                final_answer = _apply_respectful_titles(final_answer)
+
+                answer_lower    = final_answer.lower()
+                matched         = [r for r in si_results if r["book"].lower() in answer_lower]
+                display_results = matched if matched else si_results
+
+                return {
+                    "answer":         final_answer,
+                    "sources":        [r["book"]  for r in display_results],
+                    "scores":         [r["score"] for r in display_results],
+                    "flagged":        False,
+                    "low_confidence": False,
+                    "warnings":       warnings,
+                }
+
+        # ── Step 3b: No usable Sinhala chunks — use English context ─
+        print("  [si] No Sinhala chunks — falling back to English context + translation")
+        return _english_context_then_translate(question, en_query, religion)
+
+    # ════════════════════════════════════════════════════════════
+    # ENGLISH PATH  (unchanged)
+    # ════════════════════════════════════════════════════════════
+    results = search(question, religion=religion, language="en")
     if not results:
+        fb = _FALLBACK_MESSAGES.get(lang, _FALLBACK_MESSAGES["en"])
         return {
-            "answer":         "I do not have enough reliable scriptural context to answer this accurately.",
+            "answer":         fb["no_context"],
             "sources":        [],
             "scores":         [],
             "flagged":        False,
             "low_confidence": True,
             "warnings":       [],
         }
-    
-    results = _refine_results(results)
 
-    # Build context string (also passed to output moderation for reference checking)
+    results = _refine_results(results, religion)
     context = "\n\n---\n\n".join(
-        f"[Source: {r['book']} | {r['pitaka']}]\n{r['text']}"
+        f"[Source: {r['book']} | {r.get('pitaka', r.get('testament', ''))}]\n{r['text']}"
         for r in results
     )
 
-    if _is_list_request(question):
-        format_instructions = """- The user is asking for a list. Respond with a clear, direct list of book/source names found in the context.
-- Format: one book per line, with a one-sentence description of what it covers regarding the topic.
-- Do not write long prose. Be concise and direct.
-- Only include books that are present in the provided scripture context."""
-    else:
-        format_instructions = """- Start with a simple, human explanation a beginner can understand.
-- Then support it with what the scripture says, citing the source book name naturally (e.g. "As found in the Samyutta Nikaya...").
-- If the teaching has a practical dimension, briefly mention it.
-- Do not use bullet points or lists. Write in flowing, warm prose."""
+    ref_note_map = {
+        "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
+        "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
+    }
+    ref_note     = ref_note_map.get(religion, "Do NOT cite specific verse numbers")
+    format_instr = _format_instructions(religion, _is_list_request(question), "en")
+    persona      = _PERSONAS_EN[religion]
+    user_message = (
+        f"Scripture context:\n{context}\n\n"
+        f"Question: {question}\n\n"
+        f"Instructions:\n{format_instr}\n"
+        f"- {ref_note} unless those exact references appear in the context above.\n\n"
+        f"Answer:"
+    )
 
-    user_message = f"""Scripture context:
-{context}
+    raw_answer = _call_groq(persona, user_message, model)
+    raw_answer = re.sub(r"<think>.*?</think>", "", raw_answer, flags=re.DOTALL)
+    raw_answer = re.sub(r"<think>.*$",         "", raw_answer, flags=re.DOTALL).strip()
+    raw_answer = _trim_incomplete_sentence(raw_answer)
 
-Question: {question}
+    final_answer, warnings = moderate_output(raw_answer, context, religion, lang)
 
-Instructions:
-{format_instructions}
-- Do NOT cite specific verse numbers (like SN 56.11) unless those exact numbers appear in the context above.
-
-Answer:"""
-
-    # LLM generation
-    raw_answer = _call_groq(BUDDHIST_PERSONA, user_message)
-
-    # Layer 3 — Output moderation (pass context for fabrication check)
-    final_answer, warnings = moderate_output(raw_answer, context=context)
-
-    # Source reconciliation — only show sources the LLM actually mentioned.
-    # Falls back to all retrieved results if none are detected in the answer.
-    answer_lower = final_answer.lower()
-    matched = [r for r in results if r["book"].lower() in answer_lower]
+    answer_lower    = final_answer.lower()
+    matched         = [r for r in results if r["book"].lower() in answer_lower]
     display_results = matched if matched else results
 
     return {
@@ -347,42 +967,3 @@ Answer:"""
         "low_confidence": False,
         "warnings":       warnings,
     }
-
-# ────────────────────────────────────────────────────────────────
-# CLI runner
-# ────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print(f"Buddhist RAG Chatbot  —  Groq ({GROQ_MODEL})")
-    print("Type 'quit' to exit")
-    print("=" * 50)
-
-    while True:
-        try:
-            q = input("\nAsk: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nGoodbye.")
-            break
-        if q.lower() in ("quit", "exit", "q"):
-            print("Goodbye.")
-            break
-        if not q:
-            continue
-
-        print("\nThinking...")
-        result = answer_question(q)
-
-        print("\n--- Answer ---")
-        print(result["answer"])
-
-        if result["sources"]:
-            print("\n--- Sources ---")
-            for book, score in zip(result["sources"], result["scores"]):
-                print(f"  {book}  (similarity: {score:.3f})")
-
-        if result["warnings"]:
-            print(f"\n[Warnings: {', '.join(result['warnings'])}]")
-        if result["low_confidence"]:
-            print("\n[Low confidence — no chunks met the similarity threshold]")
-        if result["flagged"]:
-            print("\n[Input was flagged by moderation]")

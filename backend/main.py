@@ -33,7 +33,6 @@ def _background_load():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start heavy work in background so port opens immediately
     t = threading.Thread(target=_background_load, daemon=True)
     t.start()
     print("=== Server started. Data loading in background... ===")
@@ -66,7 +65,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     religion: str = "Buddhism"
-    language: str = "English"
+    language: str = "en"   # "en" | "si" — passed directly to answer_question
 
 
 # ════════════════════════════════════════════════
@@ -81,9 +80,9 @@ def root():
 def health():
     from retrieve import index, _religion_ids
 
-    data_dir = Path("/tmp/religious-ai-data/buddhism")
-    faiss_path = data_dir / "faiss_index.bin"
-    db_path    = data_dir / "chunks.db"
+    data_dir   = Path("/tmp/religious-ai-data/buddhism")
+    faiss_path = data_dir / "faiss_index-en-si.bin"
+    db_path    = data_dir / "chunks-en-si.db"
 
     return {
         "status":        "ready" if _ready else ("error" if _load_error else "loading"),
@@ -103,9 +102,9 @@ def health():
         "religions":     list(_religion_ids.keys()) if _religion_ids else [],
     }
 
+
 @app.post("/ask")
 def ask_question(request: QuestionRequest):
-    # Block requests until background loading is done
     if _load_error:
         raise HTTPException(status_code=503, detail=f"Server failed to load data: {_load_error}")
     if not _ready:
@@ -115,34 +114,14 @@ def ask_question(request: QuestionRequest):
     from rag_answer import answer_question
     _lazy_load()
 
-    try:
-        from translator import translate_to_english, translate_from_english_dual
-        english_question = translate_to_english(request.question, request.language)
-        use_translation = True
-    except ImportError:
-        english_question = request.question
-        use_translation = False
-
     result = answer_question(
-        question=english_question,
+        question=request.question,
         religion=request.religion,
-        language="en",
+        language=request.language,
     )
 
-    # Return both English and translated answer
-    if use_translation:
-        try:
-            from translator import translate_from_english_dual
-            dual = translate_from_english_dual(result["answer"], request.language)
-        except Exception:
-            dual = {"english": result["answer"], "translated": result["answer"], "is_english": True}
-    else:
-        dual = {"english": result["answer"], "translated": result["answer"], "is_english": True}
-
     return {
-        "answer":             dual["translated"],   # primary answer in user's language
-        "answer_english":     dual["english"],      # always English version
-        "is_english":         dual["is_english"],   # True if user selected English
+        "answer":             result["answer"],
         "sources":            result.get("sources", []),
         "scores":             result.get("scores", []),
         "confidence_warning": result.get("low_confidence", False),
