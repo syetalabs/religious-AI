@@ -1,6 +1,6 @@
 """
-data_fetcher.py  —  Buddhism only
-Downloads faiss_index-en-si.bin and chunks-en-si.db from HuggingFace.
+data_fetcher.py  —  Buddhism + Christianity
+Downloads FAISS index and chunks DB from HuggingFace for each religion.
 Deletes any stale old-named files so they are never loaded by mistake.
 """
 import shutil
@@ -14,6 +14,10 @@ _FILES = {
     "buddhism": [
         ("buddhism/faiss_index-en-si.bin", "faiss_index-en-si.bin"),
         ("buddhism/chunks-en-si.db",       "chunks-en-si.db"),
+    ],
+    "christianity": [
+        ("christianity/faiss_index.bin", "faiss_index.bin"),
+        ("christianity/chunks.db",       "chunks.db"),
     ],
 }
 

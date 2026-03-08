@@ -187,6 +187,32 @@ _OTHER_RELIGION_TERMS = {
     ],
 }
 
+# ── Cross-religion INPUT detection ────────────────────────────────
+# Blocks questions that ask about OTHER religions in the query itself.
+_CROSS_RELIGION_QUERY_TERMS = {
+    "Buddhism": [
+        "islam", "muslim", "quran", "christianity", "christian", "bible",
+        "hinduism", "hindu", "vedas", "gita", "judaism", "jewish", "torah",
+        "sikhism", "sikh", "jesus", "allah", "vishnu", "brahma", "shiva",
+        "prophet muhammad", "mohammed",
+    ],
+    "Christianity": [
+        "islam", "muslim", "quran", "buddhism", "buddhist", "tipitaka",
+        "hinduism", "hindu", "vedas", "gita", "judaism", "jewish", "torah",
+        "sikhism", "sikh", "allah", "buddha", "vishnu", "brahma", "shiva",
+        "prophet muhammad", "mohammed",
+    ],
+}
+
+# Patterns that explicitly ask what another religion says/teaches
+_CROSS_RELIGION_ASK_PATTERNS = [
+    r"\bwhat does (islam|buddhism|hinduism|judaism|sikhism|christianity)\b.{0,40}(say|teach|believe|think|claim|state)",
+    r"\baccording to (islam|buddhism|hinduism|judaism|sikhism|the quran|the bible|the torah|the vedas)\b",
+    r"\b(islam|buddhism|hinduism|judaism|sikhism)'s (view|teaching|belief|perspective|stance)\b",
+    r"\bin (islam|buddhism|hinduism|judaism|sikhism)\b.{0,30}(jesus|god|salvation|heaven|sin|prayer)",
+    r"\b(quran|torah|vedas|gita|tipitaka)\b.{0,30}(say|teach|mention|describe|speak)",
+]
+
 _FALLBACK_MESSAGES = {
     "en": {
         "comparative_religion": (
@@ -200,6 +226,11 @@ _FALLBACK_MESSAGES = {
         "comparative_or_unsafe": (
             "This question may cause religious conflict and cannot be answered. "
             "Please ask about the selected religion's teachings specifically."
+        ),
+        "cross_religion_query": (
+            "This guide is focused on the selected religion's own scripture and teachings. "
+            "Questions about other religions or their scriptures cannot be answered here. "
+            "Please ask about this religion's specific teachings."
         ),
         "no_context": "I do not have enough reliable scriptural context to answer this accurately.",
     },
@@ -216,6 +247,11 @@ _FALLBACK_MESSAGES = {
             "මෙම ප්‍රශ්නය ආගමික ගැටුම් ඇති කළ හැකි බැවින් පිළිතුරු දිය නොහැක. "
             "කරුණාකර තෝරාගත් ආගමේ ඉගැන්වීම් ගැන නිශ්චිතව අසන්න."
         ),
+        "cross_religion_query": (
+            "මෙම මාර්ගෝපදේශය තෝරාගත් ආගමේ ශාස්ත්‍රය සහ ඉගැන්වීම් කෙරෙහි පමණක් අවධානය යොමු කරයි. "
+            "වෙනත් ආගම් ගැන ප්‍රශ්න මෙහිදී පිළිතුරු දිය නොහැක. "
+            "කරුණාකර මෙම ආගමේ ඉගැන්වීම් ගැන නිශ්චිතව අසන්න."
+        ),
         "no_context": "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ.",
     },
     "ta": {
@@ -230,6 +266,11 @@ _FALLBACK_MESSAGES = {
         "comparative_or_unsafe": (
             "இந்தக் கேள்வி மத மோதலை ஏற்படுத்தக்கூடும், எனவே பதிலளிக்க முடியாது. "
             "தேர்ந்தெடுக்கப்பட்ட மதத்தின் போதனைகளைப் பற்றி குறிப்பாகக் கேட்கவும்."
+        ),
+        "cross_religion_query": (
+            "இந்த வழிகாட்டி தேர்ந்தெடுக்கப்பட்ட மதத்தின் மறைநூல் மற்றும் போதனைகளில் மட்டுமே கவனம் செலுத்துகிறது. "
+            "மற்ற மதங்களைப் பற்றிய கேள்விகளுக்கு இங்கே பதிலளிக்க முடியாது. "
+            "இந்த மதத்தின் குறிப்பிட்ட போதனைகளைப் பற்றி கேட்கவும்."
         ),
         "no_context": "இதை சரியாக பதிலளிக்க போதுமான நம்பகமான மறைநூல் சூழல் என்னிடம் இல்லை.",
     },
@@ -264,17 +305,36 @@ _OPINION_SIGNALS = [
 # Moderation functions
 # ════════════════════════════════════════════════════════════════
 
-def moderate_input(query: str) -> tuple[bool, str]:
+def moderate_input(query: str, religion: str = "Buddhism") -> tuple[bool, str]:
     q = query.lower().strip()
+
+    # 1. Unsafe / hate phrases
     for phrase in _UNSAFE_PHRASES:
         if phrase in q:
             return False, "comparative_or_unsafe"
+
+    # 2. Comparative patterns (e.g. "is Christianity better than Islam")
     for pattern in _COMPARATIVE_PATTERNS:
         if re.search(pattern, q):
             return False, "comparative_religion"
+
+    # 3. Hate speech
     for pattern in _HATE_PATTERNS:
         if re.search(pattern, q):
             return False, "hate_speech"
+
+    # 4. Cross-religion ask patterns (e.g. "what does Islam say about X")
+    for pattern in _CROSS_RELIGION_ASK_PATTERNS:
+        if re.search(pattern, q):
+            return False, "cross_religion_query"
+
+    # 5. Query contains terms belonging to a DIFFERENT religion
+    #    e.g. asking "what does the Quran say" inside the Christianity chatbot
+    blocked_terms = _CROSS_RELIGION_QUERY_TERMS.get(religion, [])
+    for term in blocked_terms:
+        if re.search(r"" + re.escape(term) + r"", q):
+            return False, "cross_religion_query"
+
     return True, "ok"
 
 
@@ -1081,7 +1141,7 @@ def answer_question(
     model = MODEL_SINHALA if lang in ("si", "ta") else MODEL_DEFAULT
 
     # ── Layer 1: Input moderation ────────────────────────────────
-    is_safe, reason = moderate_input(question)
+    is_safe, reason = moderate_input(question, religion=religion)
     if not is_safe:
         fb = _FALLBACK_MESSAGES.get(lang, _FALLBACK_MESSAGES["en"])
         return {
