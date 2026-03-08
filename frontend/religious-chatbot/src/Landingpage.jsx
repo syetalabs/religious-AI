@@ -185,14 +185,18 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
   useEffect(() => {
     let cancelled = false;
 
-    const kickoff = async () => {
-      try {
-        await fetch(`${API_BASE}/prepare`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ religion }),
-        });
-      } catch {
+    const poll = async () => {
+      // Retry the initial probe up to 5 times (server may still be starting)
+      let probeOk = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const probe = await fetch(`${API_BASE}/health`);
+          if (probe.ok) { probeOk = true; break; }
+        } catch { /* retry */ }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      if (!probeOk) {
         if (!cancelled) {
           setPhase("error");
           setStatusMsg("Could not reach the server. Is the backend running?");
@@ -205,23 +209,34 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
       setPhase("downloading");
       setStatusMsg(cfg.loadingMsg);
 
+      // Poll /health until status === "ready"
       pollRef.current = setInterval(async () => {
         if (cancelled) return;
         try {
-          const res  = await fetch(`${API_BASE}/status/${encodeURIComponent(religion)}`);
+          const res  = await fetch(`${API_BASE}/health`);
           const data = await res.json();
+
           if (data.status === "ready") {
             clearInterval(pollRef.current);
-            if (!cancelled) { setPhase("done"); setStatusMsg("Ready!"); setTimeout(() => { if (!cancelled) onReady(); }, 600); }
+            if (!cancelled) {
+              setPhase("done");
+              setStatusMsg("Ready!");
+              setTimeout(() => { if (!cancelled) onReady(); }, 600);
+            }
           } else if (data.status === "error") {
             clearInterval(pollRef.current);
-            if (!cancelled) { setPhase("error"); setStatusMsg(data.error || "An error occurred."); onError(data.error || "Failed to load data."); }
+            if (!cancelled) {
+              setPhase("error");
+              setStatusMsg(data.load_error || "An error occurred while loading data.");
+              onError(data.load_error || "Failed to load data.");
+            }
           }
-        } catch { /* keep polling */ }
+          // status === "loading" → keep polling
+        } catch { /* network hiccup — keep polling */ }
       }, POLL_INTERVAL_MS);
     };
 
-    kickoff();
+    poll();
     return () => { cancelled = true; if (pollRef.current) clearInterval(pollRef.current); };
   }, [religion]);
 

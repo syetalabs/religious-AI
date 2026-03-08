@@ -88,6 +88,14 @@ export default function Chatbot({ religion, onSwitchReligion }) {
   // Language options: Buddhism has Sinhala/Tamil; Christianity English only
   const availableLanguages = religion === "Buddhism" ? ["English", "Sinhala", "Tamil"] : LANGUAGES;
 
+  // Ping /health on mount so the connection indicator updates immediately
+  useEffect(() => {
+    fetch(`${API_BASE}/health`)
+      .then(r => r.json())
+      .then(d => setIsConnected(d.status === "ready"))
+      .catch(() => setIsConnected(false));
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
