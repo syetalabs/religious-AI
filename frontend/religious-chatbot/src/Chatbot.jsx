@@ -166,13 +166,14 @@ export default function Chatbot({ religion, onSwitchReligion }) {
 
   return (
     <div style={{
-      display: "flex", height: "100vh", width: "100vw",
+      display: "flex", height: "100dvh", width: "100vw",
       fontFamily: "'Lora', Georgia, serif",
       background: cfg.bgColor, color: cfg.text, overflow: "hidden",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; overflow: hidden; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: ${cfg.accentColor}55; border-radius: 4px; }
@@ -261,7 +262,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100vh", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100dvh", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{
