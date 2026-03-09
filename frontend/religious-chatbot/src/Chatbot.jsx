@@ -267,6 +267,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         <div style={{
           height: 58, background: cfg.headerBg, borderBottom: `1px solid ${cfg.border}`,
           display: "flex", alignItems: "center", padding: "0 20px", gap: 12, flexShrink: 0,
+          position: "sticky", top: 0, zIndex: 10,
         }}>
           <button onClick={() => setSidebarOpen(o => !o)} className="icon-btn" style={{
             width: 36, height: 36, border: `1px solid ${cfg.border}`,
@@ -278,16 +279,6 @@ export default function Chatbot({ religion, onSwitchReligion }) {
           </button>
 
           <BotAvatar size={34} emoji={cfg.botEmoji} />
-
-          <div style={{
-            padding: "4px 14px", borderRadius: 20,
-            background: `linear-gradient(135deg, ${cfg.accentColor}22, ${cfg.accentDark}11)`,
-            border: `1px solid ${cfg.accentColor}55`,
-            fontFamily: "'Cinzel', serif", fontSize: 11.5,
-            color: cfg.accentDark, letterSpacing: 1,
-          }}>
-            {cfg.emoji} {cfg.label}
-          </div>
 
           <div style={{ flex: 1 }} />
 
@@ -403,7 +394,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         </div>
 
         {/* Input Area */}
-        <div style={{ padding: "14px clamp(12px, 5%, 10%)", background: cfg.headerBg, borderTop: `1px solid ${cfg.border}` }}>
+        <div style={{ padding: "14px clamp(12px, 5%, 10%)", background: cfg.headerBg, borderTop: `1px solid ${cfg.border}`, flexShrink: 0 }}>
           {isConnected === false && (
             <div style={{
               background: "#fff3e0", border: "1px solid #f5c78e", borderRadius: 10,
