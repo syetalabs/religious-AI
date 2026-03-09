@@ -261,13 +261,12 @@ export default function Chatbot({ religion, onSwitchReligion }) {
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100vh", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{
           height: 58, background: cfg.headerBg, borderBottom: `1px solid ${cfg.border}`,
           display: "flex", alignItems: "center", padding: "0 20px", gap: 12, flexShrink: 0,
-          position: "sticky", top: 0, zIndex: 10,
         }}>
           <button onClick={() => setSidebarOpen(o => !o)} className="icon-btn" style={{
             width: 36, height: 36, border: `1px solid ${cfg.border}`,
