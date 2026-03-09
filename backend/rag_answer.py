@@ -282,9 +282,12 @@ _FALLBACK_MESSAGES = {
 
 _GREETING_PATTERNS = re.compile(
     r"^\s*("
-    r"hi|hello|hey|hiya|howdy|greetings|salutations|"
+    r"(hi|hello|hey|hiya|howdy|yo)[\s,!.]*"
+    r")?"
+    r"("
+    r"hi|hello|hey|hiya|howdy|greetings|salutations|namaste|"
     r"good\s*(morning|afternoon|evening|night|day)|"
-    r"what'?s\s+up|sup|yo|namaste|"
+    r"what'?s\s+up|sup|"
     # Sinhala greetings
     r"ආයුබෝවන්|හෙලෝ|හායි|ශුභ\s*(උදෑසන|සවස|රාත්‍රී)|"
     # Tamil greetings
@@ -296,39 +299,32 @@ _GREETING_PATTERNS = re.compile(
 
 _GREETING_RESPONSES = {
     "Buddhism": {
-        "en": (
-            "Hello! 🙏 Welcome. I'm your Buddhist guide — feel free to ask me anything "
-            "about Buddhist teachings, scripture, or the path to inner peace."
-        ),
-        "si": (
-            "ආයුබෝවන්! 🙏 ඔබව සාදරයෙන් පිළිගනිමු. මම ඔබේ බෞද්ධ මාර්ගෝපදේශකයා — "
-            "බෞද්ධ ධර්මය, ශාස්ත්‍රය හෝ ධ්‍යාන පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න."
-        ),
-        "ta": (
-            "வணக்கம்! 🙏 உங்களை வரவேற்கிறோம். நான் உங்கள் பௌத்த வழிகாட்டி — "
-            "பௌத்த போதனைகள், மறைநூல் அல்லது தியானம் பற்றி எதுவும் கேட்கலாம்."
-        ),
+        "en": "Hi! 🙏 Feel free to ask any question about Buddhism.",
+        "si": "ආයුබෝවන්! 🙏 බෞද්ධ ධර්මය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න.",
+        "ta": "வணக்கம்! 🙏 பௌத்தம் பற்றி எதுவும் கேட்கலாம்.",
     },
     "Christianity": {
-        "en": (
-            "Hello! 🙏 Welcome. I'm your Christian guide — feel free to ask me anything "
-            "about the Bible, Christian teachings, or matters of faith and grace."
-        ),
-        "si": (
-            "ආයුබෝවන්! 🙏 ඔබව සාදරයෙන් පිළිගනිමු. මම ඔබේ ක්‍රිස්තියානි මාර්ගෝපදේශකයා — "
-            "බයිබලය, ක්‍රිස්තියානි ඉගැන්වීම් හෝ විශ්වාසය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න."
-        ),
-        "ta": (
-            "வணக்கம்! 🙏 உங்களை வரவேற்கிறோம். நான் உங்கள் கிறிஸ்தவ வழிகாட்டி — "
-            "பைபிள், கிறிஸ்தவ போதனைகள் அல்லது விசுவாசம் பற்றி எதுவும் கேட்கலாம்."
-        ),
+        "en": "Hi! 🙏 Feel free to ask any question about Christianity.",
+        "si": "ආයුබෝවන්! 🙏 ක්‍රිස්තියානි ධර්මය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න.",
+        "ta": "வணக்கம்! 🙏 கிறிஸ்தவம் பற்றி எதுவும் கேட்கலாம்.",
     },
 }
 
 
 def _is_greeting(question: str) -> bool:
     """Return True if the message is a simple greeting with no substantive question."""
-    return bool(_GREETING_PATTERNS.match(question.strip()))
+    q = question.strip()
+    if _GREETING_PATTERNS.match(q):
+        return True
+    # Catch "hi good morning", "hello good evening" — strip leading hi/hello/hey
+    # then re-check the remainder against the same pattern.
+    stripped = re.sub(
+        r"^(hi|hello|hey|hiya|howdy|yo)[,\s!.]+",
+        "", q, flags=re.IGNORECASE
+    ).strip()
+    if stripped and stripped != q:
+        return bool(_GREETING_PATTERNS.match(stripped))
+    return False
 
 
 _VERSE_REF_PATTERNS = {
