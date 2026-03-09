@@ -72,7 +72,9 @@ const ErrorToast = ({ message, onClose }) => (
 export default function Chatbot({ religion, onSwitchReligion }) {
   const cfg = RELIGIONS[religion] || RELIGIONS.Buddhism;
 
-  const [sidebarOpen, setSidebarOpen]           = useState(true);
+  // Auto-close sidebar on mobile (viewport < 640px)
+  const isMobile = () => typeof window !== "undefined" && window.innerWidth < 640;
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile());
   const [messages, setMessages]                 = useState([]);
   const [input, setInput]                       = useState("");
   const [language, setLanguage]                 = useState("English");
@@ -94,6 +96,15 @@ export default function Chatbot({ religion, onSwitchReligion }) {
       .then(r => r.json())
       .then(d => setIsConnected(d.status === "ready"))
       .catch(() => setIsConnected(false));
+  }, []);
+
+  // Close sidebar when window resizes to mobile
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 640) setSidebarOpen(false);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   useEffect(() => {
@@ -181,13 +192,25 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         .send-btn:not(:disabled):hover { opacity: 0.85; }
       `}</style>
 
-      {/* Sidebar */}
+      {/* Sidebar — overlays on mobile, pushes content on desktop */}
+      {sidebarOpen && isMobile() && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: "fixed", inset: 0, background: "#0005",
+            zIndex: 20, backdropFilter: "blur(1px)",
+          }}
+        />
+      )}
       <div style={{
         width: sidebarOpen ? 220 : 0, minWidth: sidebarOpen ? 220 : 0,
         background: cfg.sidebarBg, borderRight: `1px solid ${cfg.border}`,
         display: "flex", flexDirection: "column",
         transition: "width 0.3s ease, min-width 0.3s ease",
-        overflow: "hidden", position: "relative", zIndex: 10,
+        overflow: "hidden", position: isMobile() ? "fixed" : "relative",
+        top: isMobile() ? 0 : "auto", left: isMobile() ? 0 : "auto",
+        height: isMobile() ? "100vh" : "auto",
+        zIndex: isMobile() ? 30 : 10,
       }}>
         <div style={{ padding: "20px 14px 80px", opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s", height: "100%" }}>
           <div style={{ textAlign: "center", marginBottom: 20 }}>
@@ -314,7 +337,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         </div>
 
         {/* Chat Area */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "28px 10%", position: "relative" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "28px clamp(12px, 5%, 10%)", position: "relative" }}>
           <div style={{
             position: "absolute", top: "50%", left: "50%",
             transform: "translate(-50%, -50%)",
@@ -344,7 +367,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
                 {msg.role === "bot"
                   ? <BotAvatar size={30} emoji={cfg.botEmoji} />
                   : <UserAvatar name="U" size={30} palette={cfg} />}
-                <div style={{ maxWidth: "58%", display: "flex", flexDirection: "column" }}>
+                <div style={{ maxWidth: "min(58%, 480px)", display: "flex", flexDirection: "column" }}>
                   <div style={{
                     background: msg.role === "user"
                       ? `linear-gradient(135deg, ${cfg.accentColor}, ${cfg.accentDark})`
@@ -380,7 +403,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         </div>
 
         {/* Input Area */}
-        <div style={{ padding: "14px 10%", background: cfg.headerBg, borderTop: `1px solid ${cfg.border}` }}>
+        <div style={{ padding: "14px clamp(12px, 5%, 10%)", background: cfg.headerBg, borderTop: `1px solid ${cfg.border}` }}>
           {isConnected === false && (
             <div style={{
               background: "#fff3e0", border: "1px solid #f5c78e", borderRadius: 10,
