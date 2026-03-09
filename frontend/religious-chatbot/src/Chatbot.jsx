@@ -166,14 +166,13 @@ export default function Chatbot({ religion, onSwitchReligion }) {
 
   return (
     <div style={{
-      display: "flex", height: "100dvh", width: "100vw",
+      display: "flex", height: "100vh", width: "100vw",
       fontFamily: "'Lora', Georgia, serif",
       background: cfg.bgColor, color: cfg.text, overflow: "hidden",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { height: 100%; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: ${cfg.accentColor}55; border-radius: 4px; }
@@ -262,13 +261,12 @@ export default function Chatbot({ religion, onSwitchReligion }) {
       </div>
 
       {/* Main Content */}
-      <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100vh", overflow: "hidden" }}>
 
-        {/* Header — always fixed at top */}
+        {/* Header */}
         <div style={{
           height: 58, background: cfg.headerBg, borderBottom: `1px solid ${cfg.border}`,
-          display: "flex", alignItems: "center", padding: "0 20px", gap: 12,
-          position: "fixed", top: 0, left: 0, right: 0, zIndex: 10,
+          display: "flex", alignItems: "center", padding: "0 20px", gap: 12, flexShrink: 0,
         }}>
           <button onClick={() => setSidebarOpen(o => !o)} className="icon-btn" style={{
             width: 36, height: 36, border: `1px solid ${cfg.border}`,
@@ -328,11 +326,8 @@ export default function Chatbot({ religion, onSwitchReligion }) {
           </button>
         </div>
 
-        {/* Chat Area — scrolls between fixed header and fixed input */}
-        <div style={{
-          position: "fixed", top: 58, left: 0, right: 0, bottom: 72,
-          overflowY: "auto", padding: "28px clamp(12px, 5%, 10%)",
-        }}>
+        {/* Chat Area */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "28px clamp(12px, 5%, 10%)", position: "relative" }}>
           <div style={{
             position: "absolute", top: "50%", left: "50%",
             transform: "translate(-50%, -50%)",
@@ -397,13 +392,8 @@ export default function Chatbot({ religion, onSwitchReligion }) {
           </div>
         </div>
 
-        {/* Input Area — always fixed at bottom */}
-        <div style={{
-          position: "fixed", bottom: 0, left: 0, right: 0,
-          padding: "10px clamp(12px, 5%, 10%)",
-          background: cfg.headerBg, borderTop: `1px solid ${cfg.border}`,
-          zIndex: 10,
-        }}>
+        {/* Input Area */}
+        <div style={{ padding: "14px clamp(12px, 5%, 10%)", background: cfg.headerBg, borderTop: `1px solid ${cfg.border}`, flexShrink: 0 }}>
           {isConnected === false && (
             <div style={{
               background: "#fff3e0", border: "1px solid #f5c78e", borderRadius: 10,
