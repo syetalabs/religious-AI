@@ -276,6 +276,61 @@ _FALLBACK_MESSAGES = {
     },
 }
 
+# ════════════════════════════════════════════════════════════════
+# Greeting detection
+# ════════════════════════════════════════════════════════════════
+
+_GREETING_PATTERNS = re.compile(
+    r"^\s*("
+    r"hi|hello|hey|hiya|howdy|greetings|salutations|"
+    r"good\s*(morning|afternoon|evening|night|day)|"
+    r"what'?s\s+up|sup|yo|namaste|"
+    # Sinhala greetings
+    r"ආයුබෝවන්|හෙලෝ|හායි|ශුභ\s*(උදෑසන|සවස|රාත්‍රී)|"
+    # Tamil greetings
+    r"வணக்கம்|ஹலோ|ஹாய்|காலை\s*வணக்கம்|மாலை\s*வணக்கம்"
+    r")"
+    r"[\s!.,]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_GREETING_RESPONSES = {
+    "Buddhism": {
+        "en": (
+            "Hello! 🙏 Welcome. I'm your Buddhist guide — feel free to ask me anything "
+            "about Buddhist teachings, scripture, or the path to inner peace."
+        ),
+        "si": (
+            "ආයුබෝවන්! 🙏 ඔබව සාදරයෙන් පිළිගනිමු. මම ඔබේ බෞද්ධ මාර්ගෝපදේශකයා — "
+            "බෞද්ධ ධර්මය, ශාස්ත්‍රය හෝ ධ්‍යාන පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න."
+        ),
+        "ta": (
+            "வணக்கம்! 🙏 உங்களை வரவேற்கிறோம். நான் உங்கள் பௌத்த வழிகாட்டி — "
+            "பௌத்த போதனைகள், மறைநூல் அல்லது தியானம் பற்றி எதுவும் கேட்கலாம்."
+        ),
+    },
+    "Christianity": {
+        "en": (
+            "Hello! 🙏 Welcome. I'm your Christian guide — feel free to ask me anything "
+            "about the Bible, Christian teachings, or matters of faith and grace."
+        ),
+        "si": (
+            "ආයුබෝවන්! 🙏 ඔබව සාදරයෙන් පිළිගනිමු. මම ඔබේ ක්‍රිස්තියානි මාර්ගෝපදේශකයා — "
+            "බයිබලය, ක්‍රිස්තියානි ඉගැන්වීම් හෝ විශ්වාසය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න."
+        ),
+        "ta": (
+            "வணக்கம்! 🙏 உங்களை வரவேற்கிறோம். நான் உங்கள் கிறிஸ்தவ வழிகாட்டி — "
+            "பைபிள், கிறிஸ்தவ போதனைகள் அல்லது விசுவாசம் பற்றி எதுவும் கேட்கலாம்."
+        ),
+    },
+}
+
+
+def _is_greeting(question: str) -> bool:
+    """Return True if the message is a simple greeting with no substantive question."""
+    return bool(_GREETING_PATTERNS.match(question.strip()))
+
+
 _VERSE_REF_PATTERNS = {
     "Buddhism": re.compile(
         r"\b(SN|MN|DN|AN|KN|Dhp|Ud|Iti|Snp|Thag|Thig|Ja|Cp|Mil|Pv|Vv|Vb|Ds|Kv|Pp|Ps|Ya)\s*\d+[\.\d]*\b",
@@ -1071,6 +1126,8 @@ def _english_context_then_translate(
 
     en_res = search(en_query, religion=religion, language="en")
     if not en_res:
+        # No English scripture found — only show no_context if the question
+        # is substantive. For greetings this path is already intercepted above.
         return {
             "answer": _FALLBACK_MESSAGES.get(target_lang, _FALLBACK_MESSAGES["en"])["no_context"],
             "sources": [], "scores": [], "flagged": False,
@@ -1080,7 +1137,9 @@ def _english_context_then_translate(
     en_res = _refine_results(en_res, religion)
     en_ans = _build_english_answer(en_query, en_res, religion)
 
-    if not en_ans or "I do not have enough" in en_ans:
+    # Only bail out if the LLM itself says it has no context (hallucination guard).
+    # A translated answer for si/ta is still valid even if it went through English retrieval.
+    if not en_ans or _answer_is_no_context(en_ans) or _answer_is_weak(en_ans):
         return {
             "answer": _FALLBACK_MESSAGES.get(target_lang, _FALLBACK_MESSAGES["en"])["no_context"],
             "sources": [], "scores": [], "flagged": False,
@@ -1139,6 +1198,20 @@ def answer_question(
     # ── Resolve effective language ───────────────────────────────
     lang  = _detect_language(question, language)
     model = MODEL_SINHALA if lang in ("si", "ta") else MODEL_DEFAULT
+
+    # ── Greeting shortcut — no RAG needed ───────────────────────
+    if _is_greeting(question):
+        greet_lang = lang if lang in ("si", "ta") else "en"
+        religion_greetings = _GREETING_RESPONSES.get(religion, _GREETING_RESPONSES["Buddhism"])
+        greeting_text = religion_greetings.get(greet_lang, religion_greetings["en"])
+        return {
+            "answer":         greeting_text,
+            "sources":        [],
+            "scores":         [],
+            "flagged":        False,
+            "low_confidence": False,
+            "warnings":       [],
+        }
 
     # ── Layer 1: Input moderation ────────────────────────────────
     is_safe, reason = moderate_input(question, religion=religion)
@@ -1238,8 +1311,9 @@ def answer_question(
         return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
     # ════════════════════════════════════════════════════════════
-    # ENGLISH PATH  (unchanged)
+    # ENGLISH PATH
     # ════════════════════════════════════════════════════════════
+    print(f"  [en] lang={lang!r} model={MODEL_DEFAULT!r} question={question[:60]!r}")
     results = search(question, religion=religion, language="en")
     if not results:
         fb = _FALLBACK_MESSAGES.get(lang, _FALLBACK_MESSAGES["en"])
@@ -1273,7 +1347,8 @@ def answer_question(
         f"Answer:"
     )
 
-    raw_answer = _call_groq(persona, user_message, model)
+    # Always use the fast English model for English questions — never Qwen3
+    raw_answer = _call_groq(persona, user_message, MODEL_DEFAULT)
     raw_answer = re.sub(r"<think>.*?</think>", "", raw_answer, flags=re.DOTALL)
     raw_answer = re.sub(r"<think>.*$",         "", raw_answer, flags=re.DOTALL).strip()
     raw_answer = _trim_incomplete_sentence(raw_answer)
