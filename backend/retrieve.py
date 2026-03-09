@@ -311,13 +311,20 @@ def search_sinhala_direct(
     en_query:  str,
     religion:  str   = "Buddhism",
     top_k:     int   = TOP_K,
-    threshold: float = SIMILARITY_THRESHOLD,
+    threshold: float = 0.20,   # Lower than English threshold — translated queries
+                                # have semantic drift so similarity scores are lower.
 ) -> list[dict]:
     """
     Find Sinhala scripture chunks relevant to an English query.
     Uses FAISS with the English query, then filters for language='si'.
     Falls back to empty list (triggers English-context path in rag_answer.py).
     Only applicable to Buddhism — returns [] for other religions.
+
+    Why a larger fetch_k here:
+      The FAISS index contains both English and Sinhala vectors.  English chunks
+      will generally rank higher for an English query, so we must scan deep into
+      the results before we find Sinhala chunks.  top_k * 60 gives a large enough
+      window without being unreasonably slow on a CPU index of typical size.
     """
     if religion != "Buddhism":
         return []
@@ -331,18 +338,24 @@ def search_sinhala_direct(
     query_vec = _encode(en_query)
     faiss.normalize_L2(query_vec)
 
-    fetch_k     = min(top_k * 20, idx.ntotal)
+    # Scan much deeper — English chunks dominate the top results, Sinhala ones
+    # appear further down.  Cap at idx.ntotal so we never request more than exists.
+    fetch_k = min(top_k * 60, idx.ntotal)
     scores, indices = idx.search(query_vec, fetch_k)
     scores  = scores[0]
     indices = indices[0]
 
     allowed_ids = set(_religion_ids[religion].get(religion, []))
 
+    # Keep all candidates above the (lower) threshold regardless of language —
+    # we'll filter to 'si' in the loop below.
     candidate_ids = [
         int(ix) for score, ix in zip(scores, indices)
         if ix != -1 and int(ix) in allowed_ids and float(score) >= threshold
     ]
     if not candidate_ids:
+        print(f"  [si-search] No candidates above threshold={threshold:.2f} "
+              f"(fetch_k={fetch_k}, index_size={idx.ntotal})")
         return []
 
     chunk_map = _fetch_chunks(religion, candidate_ids)
@@ -365,4 +378,6 @@ def search_sinhala_direct(
         if len(results) >= top_k:
             break
 
+    print(f"  [si-search] Sinhala chunks returned: {len(results)} "
+          f"(candidates scanned: {len(candidate_ids)}, fetch_k={fetch_k})")
     return results

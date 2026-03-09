@@ -1244,11 +1244,13 @@ def answer_question(
 
         # Step 1: Translate question to English for FAISS embedding
         en_query = _translate_query_to_english(question)
-        print(f"  [si] EN query: {en_query!r}")
+        print(f"  [si] Original question: {question[:80]!r}")
+        print(f"  [si] Translated EN query: {en_query!r}")
 
         # Step 2: Check for relevant Sinhala chunks in DB
         si_results = search_sinhala_direct(en_query, religion=religion)
-        print(f"  [si] Sinhala chunks found: {len(si_results)}")
+        print(f"  [si] Sinhala chunks found: {len(si_results)}"
+              + (f" — top score: {si_results[0]['score']:.3f}" if si_results else " — falling back to English context"))
 
         if si_results:
             # ── Step 3a: Use Sinhala scripture ──────────────────
