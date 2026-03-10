@@ -95,12 +95,14 @@ Rules you must follow without exception:
 - Do not compare Christianity with other religions.
 - Do not mix teachings from other traditions.
 - Maintain a warm, hopeful, and welcoming tone at all times.
-- When referencing scripture, mention the source book naturally (e.g. "As written in the Gospel of John...").
+- NEVER restate or paraphrase the user's question in your answer. Start directly with the answer.
+- When referencing scripture, ONLY mention a book name if that book appears in the [Source: ...] tags above. Never cite a book from memory.
 
 CRITICAL — Quoting rules:
 - Do NOT cite specific verse references (e.g. John 3:16, Romans 8:28) unless those exact references appear word-for-word in the provided context.
+- Do NOT cite or mention any book name (e.g. "1 Corinthians", "Proverbs") unless it appears in the [Source: ...] tags above.
 - Do NOT reproduce or paraphrase text not present in the provided context.
-- Never invent or recall verse references from memory — only use what is explicitly in the context.""",
+- Never invent or recall verse references or book names from memory — only use what is explicitly in the context.""",
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -141,12 +143,14 @@ _PERSONAS_SI = {
 - ක්‍රිස්තියානි ධර්මය වෙනත් ආගම් සමඟ සසඳන්න එපා.
 - වෙනත් සම්ප්‍රදායන්ගේ ඉගැන්වීම් මිශ්‍ර නොකරන්න.
 - සෑම විටෙකම උණුසුම්, බලාපොරොත්තු සහිත හා සාදරයෙන් පිළිගන්නා ස්වරයක් පවත්වා ගන්න.
-- ශාස්ත්‍රය යොමු කරන විට ප්‍රභව ග්‍රන්ථය ස්වාභාවිකව සඳහන් කරන්න (උදා. "යොහාන් ශුභාරංචිය හි ලියා ඇති පරිදි...").
+- පිළිතුරේ ආරම්භයේ පරිශීලකයාගේ ප්‍රශ්නය නැවත සඳහන් කිරීම හෝ පරිවර්තනය කිරීම කිසිවිටෙකත් නොකරන්න. පිළිතුරෙන් කෙලින්ම ආරම්භ කරන්න.
+- ශාස්ත්‍රය යොමු කරන විට ඉහත [Source: ...] ටැග් වල දිස්වන ග්‍රන්ථ නාම පමණක් සඳහන් කරන්න. මතකයෙන් කිසිදු ග්‍රන්ථ නාමයක් සඳහන් නොකරන්න.
 
 තීරණාත්මක — උද්ධෘත නීති:
 - ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම්, නිශ්චිත වාක්‍ය යොමු (John 3:16, Romans 8:28 වැනි) උද්ධෘත නොකරන්න.
+- ඉහත [Source: ...] ටැග් වල දිස් නොවන කිසිදු ග්‍රන්ථ නාමයක් (1 කොරින්ති, හිතෝපදේශ, 1 යොහන් ආදී) සඳහන් නොකරන්න.
 - ලබා දී ඇති සන්දර්භයේ නැති පාඨ නැවත නිෂ්පාදනය නොකරන්න හෝ ප්‍රතිනිර්මාණය නොකරන්න.
-- කිසිදා මතකයෙන් උද්ධෘත නිර්මාණය නොකරන්න — සන්දර්භයේ ඇති දෙය පමණක් භාවිත කරන්න.""",
+- කිසිදා මතකයෙන් උද්ධෘත හෝ ග්‍රන්ථ නාම නිර්මාණය නොකරන්න — සන්දර්භයේ ඇති දෙය පමණක් භාවිත කරන්න.""",
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -333,6 +337,7 @@ _VERSE_REF_PATTERNS = {
         re.IGNORECASE,
     ),
     "Christianity": re.compile(
+        # ── English book names with chapter:verse ──────────────────────────
         r"\b(Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|"
         r"1\s*Samuel|2\s*Samuel|1\s*Kings|2\s*Kings|1\s*Chronicles|2\s*Chronicles|"
         r"Ezra|Nehemiah|Esther|Job|Psalms?|Proverbs?|Ecclesiastes|Song\s*of\s*Solomon|"
@@ -342,10 +347,50 @@ _VERSE_REF_PATTERNS = {
         r"1\s*Corinthians|2\s*Corinthians|Galatians|Ephesians|Philippians|"
         r"Colossians|1\s*Thessalonians|2\s*Thessalonians|1\s*Timothy|2\s*Timothy|"
         r"Titus|Philemon|Hebrews|James|1\s*Peter|2\s*Peter|"
-        r"1\s*John|2\s*John|3\s*John|Jude|Revelation|Rev)\s+\d+:\d+(?:-\d+)?\b",
-        re.IGNORECASE,
+        r"1\s*John|2\s*John|3\s*John|Jude|Revelation|Rev)\s+\d+:\d+(?:-\d+)?\b"
+        # ── Sinhala book names followed by chapter:verse ───────────────────
+        r"|(?:"
+        r"උත්පත්ති|පිටවීම|ලෙවිවිවරණය|ගණනය කිරීම|ද්විතීය කථාව|"
+        r"යෝෂුවා|විනිසුරන්|රූත්|1\s*සාමுවෙල්|2\s*සාමුවෙල්|"
+        r"1\s*රාජාවලිය|2\s*රාජාවලිය|ගීතාවලිය|හිතෝපදේශ|ප්‍රේරිතයන්ගේ|"
+        r"රෝමවරුන්ට|1\s*කොරින්ති|2\s*කොරින්ති|ගලාතිවරුන්ට|එපෙසි|"
+        r"පිලිප්පිවරුන්ට|කොලොස්සි|1\s*තෙස්සලෝනිකෙවරුන්ට|"
+        r"2\s*තෙස්සලෝනිකෙවරුන්ට|1\s*තිමෝතිවරුන්ට|2\s*තිමෝතිවරුන්ට|"
+        r"තීතස්|ෆිලේමොන්|හෙබ්‍රෙව්|යාකොබ්|1\s*පේතෘස්|2\s*පේතෘස්|"
+        r"1\s*යොහන්|2\s*යොහන්|3\s*යොහන්|යූදස්|එළිදරව්ව|"
+        r"මත්තෙව්|මාර්ක|ලූකස්|යොහන්|ඊශාය|යෙරෙමියා|එසෙකියෙල්|දානියෙල්"
+        r")\s+\d+[:\.\s]\d+(?:-\d+)?"
+        # ── Tamil book names followed by chapter:verse ─────────────────────
+        r"|(?:"
+        r"ஆதியாகமம்|யாத்திராகமம்|லேவியராகமம்|எண்ணாகமம்|உபாகமம்|"
+        r"யோசுவா|நியாயாதிபதிகள்|ரூத்|1\s*சாமுவேல்|2\s*சாமுவேல்|"
+        r"1\s*இராஜாக்கள்|2\s*இராஜாக்கள்|சங்கீதம்|நீதிமொழிகள்|"
+        r"மத்தேயு|மாற்கு|லூக்கா|யோவான்|அப்போஸ்தலர்|ரோமர்|"
+        r"1\s*கொரிந்தியர்|2\s*கொரிந்தியர்|கலாத்தியர்|எபேசியர்|"
+        r"பிலிப்பியர்|கொலோசெயர்|1\s*தெசலோனிக்கேயர்|"
+        r"2\s*தெசலோனிக்கேயர்|1\s*தீமோத்தேயு|2\s*தீமோத்தேயு|"
+        r"தீத்து|பிலேமோன்|எபிரெயர்|யாக்கோபு|1\s*பேதுரு|2\s*பேதுரு|"
+        r"1\s*யோவான்|2\s*யோவான்|3\s*யோவான்|யூதா|வெளிப்படுத்தல்|"
+        r"ஏசாயா|எரேமியா|எசேக்கியேல்|தானியேல்"
+        r")\s+\d+[:\.\s]\d+(?:-\d+)?",
+        re.UNICODE,
     ),
 }
+
+# Matches [Source: ...] or [மூலாශ்‍ர: ...] or [මූලාශ්‍රය: ...] tags that
+# leak from the context prompt into the LLM answer.
+_SOURCE_TAG_RE = re.compile(
+    r"\[(?:Source|මූලාශ්‍රය|மூலம்)[^\]]*\]",
+    re.UNICODE,
+)
+
+def _scrub_source_tags(text: str) -> str:
+    """Remove any [Source: ...] / [මූලාශ්‍රය: ...] / [மூலம்: ...] tags
+    that the LLM echoed back from the context prompt into its answer."""
+    cleaned = _SOURCE_TAG_RE.sub("", text)
+    # Tidy up any double-spaces or trailing whitespace left behind
+    cleaned = re.sub(r"  +", " ", cleaned)
+    return cleaned.strip()
 
 _OPINION_SIGNALS = [
     r"\bi (think|believe|feel|personally|would say)\b",
@@ -404,6 +449,8 @@ def _check_fabricated_references(response: str, context: str, religion: str) -> 
 def moderate_output(
     response: str, context: str, religion: str, lang: str = "en"
 ) -> tuple[str, list[str]]:
+    # Always strip any [Source: ...] tags the LLM echoed from the context prompt
+    response = _scrub_source_tags(response)
     warnings = []
     r        = response.lower()
 
@@ -512,7 +559,42 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
         step1 = re.sub(r"<think>.*?</think>", "", step1, flags=re.DOTALL).strip()
         step1 = step1 or question
     except Exception:
-        return question   # total failure — return original
+        step1 = question   # will be caught by the script-check below
+
+    # ── Step 1b: Retry with Qwen3 if llama returned untranslated text ──
+    # Happens when llama echoes the Sinhala/Tamil question unchanged or empty.
+    if not step1 or _is_sinhala(step1) or _is_tamil(step1) or step1 == question:
+        print(f"  [translate] Step1 returned untranslated text — retrying with {MODEL_SINHALA!r}")
+        retry_system = (
+            "You are a professional translator. "
+            "The user will give you a question written in Sinhala or Tamil script. "
+            "Your ONLY job is to output the English translation of that question. "
+            "Output ONLY English — absolutely no Sinhala, Tamil, or other scripts. "
+            "No explanations, no original text, no quotes. Just the English translation."
+        )
+        payload_retry = {
+            "model":    MODEL_SINHALA,
+            "messages": [
+                {"role": "system", "content": retry_system},
+                {"role": "user",   "content": question},
+            ],
+            "temperature": 0.0,
+            "max_tokens":  80,
+        }
+        try:
+            resp2 = requests.post(GROQ_URL, headers=headers, json=payload_retry, timeout=20)
+            resp2.raise_for_status()
+            retry_result = resp2.json()["choices"][0]["message"]["content"].strip()
+            retry_result = re.sub(r"<think>.*?</think>", "", retry_result, flags=re.DOTALL).strip()
+            if retry_result and not _is_sinhala(retry_result) and not _is_tamil(retry_result):
+                print(f"  [translate] Retry succeeded: {retry_result!r}")
+                step1 = retry_result
+            else:
+                print(f"  [translate] Retry also failed — using original question for search")
+                return question
+        except Exception:
+            print(f"  [translate] Retry exception — using original question for search")
+            return question
 
     # ── Step 2: Nuance verification ──────────────────────────────
     # Detect source language for the verification prompt
@@ -1008,9 +1090,10 @@ def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
             "- Do not use bullet points or lists. Write in flowing, warm prose."
         )
     return (
+        "- Do NOT restate or paraphrase the question. Start directly with the answer.\n"
         "- Start with a simple, human explanation a newcomer can understand.\n"
         "- Then support it with what the scripture says, citing the source book "
-        "naturally (e.g. \"As written in the Gospel of John...\").\n"
+        "naturally ONLY if that book appears in the [Source: ...] tags above.\n"
         "- If the teaching has a practical or spiritual dimension, briefly mention it.\n"
         "- Do not use bullet points or lists. Write in flowing, warm prose."
     )
@@ -1054,7 +1137,7 @@ def _trim_incomplete_sentence(text: str) -> str:
     return text
 
 
-# Respectful titles
+# Respectful titles — Buddhism
 _BUDDHA_REPLACEMENTS = [
     ("\u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0dcf\u0da2\u0dcf",
      "\u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0da2\u0dcf\u0dab\u0db1\u0dca \u0dc0\u0dc4\u0db1\u0dca\u0dc3\u0dda"),
@@ -1064,10 +1147,80 @@ _BUDDHA_REPLACEMENTS = [
      "\u0d9c\u0dbd\u0dca\u0db0\u0db8 \u0db6\u0dd4\u0daf\u0dd4\u0dbb\u0da2\u0dcf\u0dab\u0db1\u0dca \u0dc0\u0dc4\u0db1\u0dca\u0dc3\u0dda"),
 ]
 
-def _apply_respectful_titles(text):
-    for a, b in _BUDDHA_REPLACEMENTS:
-        text = text.replace(a, b)
+# Respectful titles — Christianity
+# Google Translate and most LLMs render Jesus as යේසුස් (incorrect Sinhala convention)
+# The correct Sinhala Catholic/Protestant spelling is ජේසුස් වහන්සේ.
+_CHRISTIAN_REPLACEMENTS = [
+    ("යේසුස් ක්‍රිස්තුස් වහන්සේ", "ජේසුස් ක්‍රිස්තුස් වහන්සේ"),
+    ("යේසුස් ක්‍රිස්තුස්",        "ජේසුස් ක්‍රිස්තුස්"),
+    ("යේසුස් වහන්සේ",             "ජේසුස් වහන්සේ"),
+    ("යේසුස්",                     "ජේසුස්"),
+]
+
+def _apply_respectful_titles(text: str, religion: str = "Buddhism") -> str:
+    if religion == "Christianity":
+        for wrong, correct in _CHRISTIAN_REPLACEMENTS:
+            text = text.replace(wrong, correct)
+    else:
+        for a, b in _BUDDHA_REPLACEMENTS:
+            text = text.replace(a, b)
     return text
+
+
+# Strip the LLM echoing the user's question back at the start of its answer.
+# Covers:
+#   SI:  ප්‍රශ්නය "ශුද්ධාත්මය යනු කුමක්ද?" ...
+#        "ශුද්ධාත්මය යනු කුමක්ද?" යන ප්‍රශ්නය ...
+#   TA:  கேள்வி "யார் இயேசு?" ...
+#   EN:  The question "Who is the Holy Spirit?" ...
+#   Mixed: The question "ශුද්ධ ආත්මය කවුද?" සිංහලෙන් ...
+_QUESTION_ECHO_RE = re.compile(
+    r'^(?:'
+    # Sinhala: ප්‍රශ්නය "..."
+    r'ප්‍රශ්නය\s*[""„\u201c\u201d].*?[""\u201d\u201c][^\n.]*?[.\n]?\s*'
+    # Sinhala: "..." යන ප්‍රශ්නය
+    r'|[""„\u201c\u201d].*?[""\u201d\u201c]\s*යන\s*ප්‍රශ්නය[^\n.]*?[.\n]?\s*'
+    # Tamil: கேள்வி "..."
+    r'|கேள்வி\s*[""„\u201c\u201d].*?[""\u201d\u201c][^\n.]*?[.\n]?\s*'
+    # English / mixed: The question "..." or Question: "..."
+    r'|[Tt]he\s+question\s*[""„\u201c\u201d].*?[""\u201d\u201c][^\n.]*?[.\n]?\s*'
+    r'|[Qq]uestion\s*:\s*[""„\u201c\u201d].*?[""\u201d\u201c][^\n.]*?[.\n]?\s*'
+    r')',
+    re.UNICODE | re.DOTALL,
+)
+
+# Matches fabricated in-text book citation phrases the LLM writes in Sinhala/Tamil
+# after translation, e.g. "1 කොරින්ති පොතේ ලියා ඇති පරිදි," or
+# "හිතෝපදේශ ග්‍රන්ථයේ සඳහන් වන පරිදි"
+_SI_BOOK_CITE_RE = re.compile(
+    r'[\w\s\u0D80-\u0DFF\u0B80-\u0BFF\d]+?\s*(?:'
+    r'පොතේ\s*ලියා\s*ඇති\s*පරිදි|'
+    r'ග්‍රන්ථයේ\s*(?:ලියා\s*ඇති|සඳහන්\s*වන)\s*පරිදි|'
+    r'හි\s*ලියා\s*ඇති\s*பரிதி|'
+    r'நூலில்\s*கூறப்பட்டுள்ளது\s*போல்|'
+    r'புத்தகத்தில்\s*எழுதப்பட்டுள்ளபடி'
+    r')[,\s]*',
+    re.UNICODE,
+)
+
+def _scrub_fabricated_book_cites(text: str, context: str) -> str:
+    """
+    Remove inline book citation phrases (e.g. '1 කොරින්ති පොතේ ලියා ඇති පරිදි,')
+    where the cited book does NOT appear in the retrieved context.
+    """
+    def _keep(m: re.Match) -> str:
+        phrase = m.group(0)
+        # If the phrase's book name appears somewhere in the context, keep it
+        if any(word in context for word in phrase.split() if len(word) > 3):
+            return phrase
+        return ""
+    return _SI_BOOK_CITE_RE.sub(_keep, text).strip()
+
+
+def _scrub_question_echo(text: str) -> str:
+    """Remove any opening where the LLM restates the user's question."""
+    cleaned = _QUESTION_ECHO_RE.sub("", text).strip()
+    return cleaned if cleaned else text
 
 
 # No-context detection & scrubbing
@@ -1232,7 +1385,17 @@ def _review_translation(
                 "  ස්වර්ගය          → heaven — 'sky' නොවේ\n"
                 "  නිරය             → hell\n"
                 "  පශ්චාත්තාපය      → repentance — 'regret' පමණ නොවේ\n"
-                "  ශුද්ධ ලියවිල්ල  → Bible / scripture\n\n"
+                "  ශුද්ධ ලියවිල්ල  → Bible / scripture\n"
+                "  තෑග්ග / ප්‍රදානය → gift (දෙවියන් වහන්සේගෙන් ලැබෙන) — 'ආගෝපාදා' හෝ ව්‍යාජ වචන නොවේ\n"
+                "  දිව් බස / භාෂාවන් → tongues (spiritual gift) — 'languages' පමණ නොවේ\n"
+                "  අභිරහස           → mystery — 'secret' හෝ 'puzzle' නොවේ\n"
+                "  සාක්ෂිය          → testimony / witness\n"
+                "  දිව්‍ය ආශිර්වාදය → blessing — 'good luck' නොවේ\n"
+                "  ප්‍රකාශය          → revelation / prophecy — context අනුව\n\n"
+                "විශේෂ අවවාදය: ඉහත ලැයිස්තුවේ නොමැති ඕනෑම වචනයක් "
+                "සිංහලෙන් නොව ව්‍යාජ ශබ්දයක් ලෙස පෙනේ නම් (උදා. 'ආගෝපාදා', "
+                "'ප්‍රේෂිතා', 'ශාන්තිකා' ආදී), එය Google Translate දෝෂයකි — "
+                "ඉංග්‍රීසි මුලාශ්‍රය දෙස බලා නිවැරදි සිංහල ශබ්දයෙන් ප්‍රතිස්ථාපනය කරන්න.\n"
                 "- 'ත්‍රිපිටකය', 'නිර්වාණය' හෝ බෞද්ධ සංකල්ප ක්‍රිස්තියානි පිළිතුරක "
                 "ඇතුළත් නොකරන්න."
             ),
@@ -1243,11 +1406,15 @@ def _review_translation(
             "ඔබේ කාර්යය:\n"
             "1. ලබා දී ඇති සිංහල පරිවර්තනය සමාලෝචනය කරන්න.\n"
             "2. අස්වාභාවික, වැරදි, හෝ Google Translate ගැටළු නිවැරදි කරන්න.\n"
-            f"3. {religion_note}\n"
-            "4. වෙනත් ආගම්වලට අයත් පද හෝ සංකල්ප (cross-religion terminology) "
+            "3. ව්‍යාජ හෝ නොපවතින සිංහල වචන (Google Translate දෝෂ) හඳුනා ගෙන "
+            "නිවැරදි සිංහල ශබ්දයෙන් ප්‍රතිස්ථාපනය කරන්න. "
+            "උදාහරණ: 'ආගෝපාදා' → 'තෑග්ග', 'ප්‍රේෂිතා' → නිවැරදි ශබ්දය, "
+            "ඕනෑම නොදන්නා හෝ ව්‍යාජ ශබ්දයක් ඉංග්‍රීසි මූලාශ්‍රය දෙස බලා නිවැරදි කරන්න.\n"
+            f"4. {religion_note}\n"
+            "5. වෙනත් ආගම්වලට අයත් පද හෝ සංකල්ප (cross-religion terminology) "
             "ඉවත් කර නිවැරදි ආගමික පාරිභාෂිතයෙන් ප්‍රතිස්ථාපනය කරන්න.\n"
-            "5. මුල් ඉංග්‍රීසි පිළිතුරේ අර්ථය හරියටම ආරක්ෂා කරන්න.\n"
-            "6. නිවැරදි කළ සිංහල පාඨය පමණක් ලබා දෙන්න. "
+            "6. මුල් ඉංග්‍රීසි පිළිතුරේ අර්ථය හරියටම ආරක්ෂා කරන්න.\n"
+            "7. නිවැරදි කළ සිංහල පාඨය පමණක් ලබා දෙන්න. "
             "කිසිදු පැහැදිලි කිරීමක්, ඉංග්‍රීසි, හෝ ටිප්පණි නොතිබිය යුතුය."
         )
 
@@ -1319,8 +1486,17 @@ def _english_context_then_translate(
     translated  = _trim_incomplete_sentence(translated)
     translated  = _review_translation(en_ans, translated, religion, target_lang)
     translated  = _trim_incomplete_sentence(translated)
-    if target_lang == "si":
-        translated = _apply_respectful_titles(translated)
+    translated  = _scrub_question_echo(translated)
+
+    # Build English context string for fabricated-reference checking
+    en_context = "\n\n".join(
+        f"[Source: {r['book']} | {r.get('pitaka', r.get('testament', ''))}]\n{r['text']}"
+        for r in en_res
+    )
+    translated  = _scrub_fabricated_book_cites(translated, en_context)
+    if target_lang in ("si", "ta"):
+        translated = _apply_respectful_titles(translated, religion)
+    translated, extra_warnings = moderate_output(translated, en_context, religion, target_lang)
 
     warning_key = f"used_en_context_with_translation_{target_lang}"
     matched = [r for r in en_res if r["book"].lower() in translated.lower()]
@@ -1331,7 +1507,7 @@ def _english_context_then_translate(
         "scores":         [r["score"] for r in disp],
         "flagged":        False,
         "low_confidence": False,
-        "warnings":       [warning_key],
+        "warnings":       [warning_key] + extra_warnings,
     }
 
 
@@ -1464,10 +1640,12 @@ def answer_question(
                 # Qwen3 review: fix unnatural phrasing and mistranslated terms
                 si_ans = _review_translation(raw, si_ans, religion, "si")
                 si_ans = _trim_incomplete_sentence(si_ans)
-                si_ans = _apply_respectful_titles(si_ans)
+                si_ans = _scrub_question_echo(si_ans)
+                si_ans = _apply_respectful_titles(si_ans, religion)
 
                 final_answer, warnings = moderate_output(si_ans, context, religion, "si")
-                final_answer = _apply_respectful_titles(final_answer)
+                final_answer = _scrub_question_echo(final_answer)
+                final_answer = _apply_respectful_titles(final_answer, religion)
 
                 answer_lower    = final_answer.lower()
                 matched         = [r for r in si_results if r["book"].lower() in answer_lower]
