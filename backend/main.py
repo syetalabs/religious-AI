@@ -122,10 +122,9 @@ def ask_question(request: QuestionRequest):
     if request.religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {request.religion}. Supported: {supported}")
 
-    # Christianity is English-only for now
+    # All supported languages are passed through; rag_answer.py handles
+    # the translation path for Christianity Sinhala / Tamil.
     language = request.language
-    if request.religion == "Christianity" and language != "en":
-        language = "en"
 
     from retrieve import _lazy_load
     from rag_answer import answer_question

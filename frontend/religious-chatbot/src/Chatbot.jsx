@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { RELIGIONS, WatermarkSVG } from "./Landingpage";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://religious-ai.onrender.com";
-// Christianity is English-only for now
-const LANGUAGES = ["English"];
+const ALL_LANGUAGES = ["English", "Sinhala", "Tamil"];
 
 // ─── Avatars ──────────────────────────────────────────────────
 const UserAvatar = ({ name = "User", size = 32, palette }) => (
@@ -87,8 +86,8 @@ export default function Chatbot({ religion, onSwitchReligion }) {
   const messagesEndRef = useRef(null);
   const inputRef       = useRef(null);
 
-  // Language options: Buddhism has Sinhala/Tamil; Christianity English only
-  const availableLanguages = religion === "Buddhism" ? ["English", "Sinhala", "Tamil"] : LANGUAGES;
+  // All religions now support English, Sinhala, and Tamil
+  const availableLanguages = ALL_LANGUAGES;
 
   // Ping /health on mount so the connection indicator updates immediately
   useEffect(() => {

@@ -446,7 +446,7 @@ def moderate_output(
 # are meaningful, while still returning Sinhala chunks from the DB.
 # ════════════════════════════════════════════════════════════════
 
-def _translate_query_to_english(question: str) -> str:
+def _translate_query_to_english(question: str, religion: str = "Buddhism") -> str:
     """
     Translate a Sinhala or Tamil question to English for FAISS retrieval.
 
@@ -454,12 +454,18 @@ def _translate_query_to_english(question: str) -> str:
       Step 1 — Fast translation via llama (MODEL_DEFAULT).
       Step 2 — Nuance verification via Qwen3 (MODEL_SINHALA).
                 Qwen3 checks whether the key concept/term in the original
-                question was translated with its correct Buddhist meaning.
+                question was translated with its correct religious meaning.
                 If not, it returns a corrected English query.
 
     This prevents mistranslations like:
-      ஏக்கம்  → "suffering"  (wrong) should be → "longing / craving / tanha"
-      ශූන්‍යතාව → "emptiness" (ok)   or → "sunyata / void" (also ok)
+      Buddhism:
+        ஏக்கம்   → "suffering"  (wrong) should be → "longing / craving / tanha"
+        ශූන්‍යතාව → "emptiness" (ok)   or → "sunyata / void" (also ok)
+      Christianity:
+        ගැලවීම   → "escape / rescue" (wrong) should be → "salvation"
+        ත්‍රිත්වය → "three groups" (wrong) should be → "Trinity"
+        இரட்சிப்பு → "rescue" (wrong) should be → "salvation"
+        மன்னிப்பு → "forgiveness / pardon" — keep as "forgiveness / grace"
 
     Falls back to the Step 1 result if Step 2 fails.
     """
@@ -469,17 +475,30 @@ def _translate_query_to_english(question: str) -> str:
     }
 
     # ── Step 1: Fast translation ─────────────────────────────────
+    _step1_system = {
+        "Buddhism": (
+            "You are a translator. Translate the following question into "
+            "concise English suitable for a Buddhist scripture search. "
+            "Preserve the precise meaning of every religious or philosophical term. "
+            "Output ONLY the English translation — no explanation, no extra text."
+        ),
+        "Christianity": (
+            "You are a translator. Translate the following question into "
+            "concise English suitable for a Christian Bible scripture search. "
+            "Preserve the precise meaning of every Christian theological term — "
+            "for example: ගැලවීම/இரட்சிப்பு → salvation, ත්‍රිත්වය/திரித்துவம் → Trinity, "
+            "ඇදහිල්ල/விசுவாசம் → faith, පාපය/பாவம் → sin, දෙවිඳු/கடவுள் → God, "
+            "ශුද්ධ ලියවිල්ල/பைபிள் → Bible / scripture. "
+            "Output ONLY the English translation — no explanation, no extra text."
+        ),
+    }
+    step1_system = _step1_system.get(religion, _step1_system["Buddhism"])
     payload_1 = {
         "model":    MODEL_DEFAULT,
         "messages": [
             {
                 "role":    "system",
-                "content": (
-                    "You are a translator. Translate the following question into "
-                    "concise English suitable for a Buddhist scripture search. "
-                    "Preserve the precise meaning of every religious or philosophical term. "
-                    "Output ONLY the English translation — no explanation, no extra text."
-                ),
+                "content": step1_system,
             },
             {"role": "user", "content": question},
         ],
@@ -499,25 +518,116 @@ def _translate_query_to_english(question: str) -> str:
     # Detect source language for the verification prompt
     src_lang = "Tamil" if _is_tamil(question) else "Sinhala"
 
-    payload_2 = {
-        "model":    MODEL_SINHALA,
-        "messages": [
-            {
-                "role":    "system",
-                "content": (
-                    "You are a Buddhist scholar fluent in Pali, English, Sinhala, and Tamil.\n\n"
-                    "Your task: verify that an English translation of a Buddhist question "
-                    "correctly preserves the nuance of the key concept or term.\n\n"
-                    "Rules:\n"
-                    "1. Identify the main Buddhist concept or term in the original question.\n"
-                    "2. Check if the English translation captures its correct Buddhist meaning "
-                    "using the reference glossary below.\n"
-                    "3. If the translation is correct, return it UNCHANGED.\n"
-                    "4. If the translation is wrong or loses important nuance, return a corrected "
-                    "English query that will retrieve the right Buddhist scripture passages.\n"
-                    "5. Output ONLY the final English query — no explanation, no commentary.\n\n"
+    if religion == "Christianity":
+        _christianity_glossary = (
+            "═══ TAMIL → ENGLISH CHRISTIAN GLOSSARY ═══\n\n"
 
-                    "═══ TAMIL → PALI / ENGLISH GLOSSARY ═══\n\n"
+            "CORE THEOLOGY:\n"
+            "  இரட்சிப்பு       → salvation — NOT 'rescue' or 'escape'\n"
+            "  திரித்துவம்      → Trinity — Father, Son, Holy Spirit — NOT 'three groups'\n"
+            "  விசுவாசம்        → faith / belief — NOT just 'trust'\n"
+            "  கிருபை           → grace — unmerited divine favour — NOT 'kindness' alone\n"
+            "  பாவம்            → sin — NOT 'mistake' or 'fault'\n"
+            "  மன்னிப்பு        → forgiveness — NOT 'pardon' in a legal sense\n"
+            "  மீட்பு           → redemption — NOT 'recovery'\n"
+            "  நித்திய ஜீவன்    → eternal life — NOT 'immortality'\n"
+            "  நரகம்            → hell — NOT 'fire'\n"
+            "  சொர்க்கம்        → heaven — NOT 'sky'\n\n"
+
+            "GOD AND JESUS:\n"
+            "  கடவுள்           → God\n"
+            "  இயேசு கிறிஸ்து  → Jesus Christ\n"
+            "  கிறிஸ்து         → Christ — the anointed one — NOT a name alone\n"
+            "  ஆண்டவர்         → Lord\n"
+            "  பரிசுத்த ஆவி    → Holy Spirit — NOT 'holy ghost' in modern context\n"
+            "  தேவன்            → God (formal/literary)\n"
+            "  மகன்             → Son (of God) — NOT just 'boy' or 'child'\n\n"
+
+            "SACRAMENTS AND PRACTICE:\n"
+            "  ஞானஸ்நானம்      → baptism — NOT 'bath' or 'washing'\n"
+            "  திருவிருந்து     → Holy Communion / Eucharist — NOT 'feast'\n"
+            "  ஜெபம்            → prayer — NOT 'request'\n"
+            "  வழிபாடு         → worship\n"
+            "  உபவாசம்         → fasting\n"
+            "  மனந்திரும்புதல் → repentance — NOT 'changing one's mind'\n\n"
+
+            "SCRIPTURE AND CHURCH:\n"
+            "  பைபிள்           → Bible\n"
+            "  புதிய ஏற்பாடு   → New Testament\n"
+            "  பழைய ஏற்பாடு   → Old Testament\n"
+            "  சுவிசேஷம்       → Gospel — NOT 'good news story'\n"
+            "  திருச்சபை       → Church — NOT 'building'\n"
+            "  போதகர்           → pastor / preacher\n\n"
+
+            "═══ SINHALA → ENGLISH CHRISTIAN GLOSSARY ═══\n\n"
+
+            "CORE THEOLOGY:\n"
+            "  ගැලවීම           → salvation — NOT 'escape', 'rescue', or 'relief'\n"
+            "  ත්‍රිත්වය        → Trinity — Father, Son, Holy Spirit — NOT 'three groups' or 'trio'\n"
+            "  ඇදහිල්ල         → faith — NOT just 'belief' or 'trust'\n"
+            "  කරුණාව           → grace — divine unmerited favour — NOT just 'mercy'\n"
+            "  පාපය             → sin — NOT 'mistake' or 'wrongdoing' generically\n"
+            "  සමාව             → forgiveness — NOT 'excuse'\n"
+            "  මිදීම            → redemption — NOT 'freedom' alone\n"
+            "  සදාකාලික ජීවිතය → eternal life — NOT 'everlasting living'\n"
+            "  නිරය             → hell — NOT 'underworld'\n"
+            "  ස්වර්ගය          → heaven — NOT 'sky'\n\n"
+
+            "GOD AND JESUS:\n"
+            "  දෙවිඳු / දෙවියන් → God\n"
+            "  යේසුස් ක්‍රිස්තුස් → Jesus Christ\n"
+            "  ක්‍රිස්තුස්      → Christ — the anointed one\n"
+            "  ස්වාමීන්         → Lord\n"
+            "  පරිශුද්ධ ආත්මය  → Holy Spirit — NOT 'holy soul' or 'pure soul'\n"
+            "  පුත්‍රයා         → Son (of God) — NOT just 'son' or 'child'\n\n"
+
+            "SACRAMENTS AND PRACTICE:\n"
+            "  බාප්තිස්මය       → baptism — NOT 'bathing' or 'washing'\n"
+            "  ශුද්ධ කොමියුනියන් → Holy Communion / Eucharist — NOT 'holy meal'\n"
+            "  යාච්ඤාව          → prayer — NOT 'request' or 'begging'\n"
+            "  නමස්කාරය         → worship\n"
+            "  උපවාසය           → fasting\n"
+            "  පශ්චාත්තාපය      → repentance — NOT 'regret' alone\n\n"
+
+            "SCRIPTURE AND CHURCH:\n"
+            "  ශුද්ධ ලියවිල්ල  → Bible / scripture — NOT 'holy writing' generically\n"
+            "  නව ගිවිසුම        → New Testament\n"
+            "  පැරණි ගිවිසුම    → Old Testament\n"
+            "  සුවිශේෂය          → Gospel — NOT 'good news' alone\n"
+            "  සභාව              → Church — NOT just 'assembly' or 'meeting'\n"
+            "  පාස්තෝරතුමා       → pastor\n"
+        )
+
+        step2_system = (
+            f"You are a Christian theology scholar fluent in English, Sinhala, and Tamil.\n\n"
+            f"Your task: verify that an English translation of a Christian question "
+            f"correctly preserves the theological meaning of the key term.\n\n"
+            f"Rules:\n"
+            f"1. Identify the main Christian concept or term in the original {src_lang} question.\n"
+            f"2. Check if the English translation captures its correct Christian theological meaning "
+            f"using the reference glossary below.\n"
+            f"3. If the translation is correct, return it UNCHANGED.\n"
+            f"4. If the translation is wrong or loses important theological nuance, return a corrected "
+            f"English query that will retrieve the right Bible passages.\n"
+            f"5. Output ONLY the final English query — no explanation, no commentary.\n\n"
+            f"{_christianity_glossary}"
+        )
+    else:
+        # Buddhism (original prompt)
+        step2_system = (
+            "You are a Buddhist scholar fluent in Pali, English, Sinhala, and Tamil.\n\n"
+            "Your task: verify that an English translation of a Buddhist question "
+            "correctly preserves the nuance of the key concept or term.\n\n"
+            "Rules:\n"
+            "1. Identify the main Buddhist concept or term in the original question.\n"
+            "2. Check if the English translation captures its correct Buddhist meaning "
+            "using the reference glossary below.\n"
+            "3. If the translation is correct, return it UNCHANGED.\n"
+            "4. If the translation is wrong or loses important nuance, return a corrected "
+            "English query that will retrieve the right Buddhist scripture passages.\n"
+            "5. Output ONLY the final English query — no explanation, no commentary.\n\n"
+
+            "═══ TAMIL → PALI / ENGLISH GLOSSARY ═══\n\n"
 
                     "THREE MARKS OF EXISTENCE:\n"
                     "  அனிச்சை       → impermanence (anicca) — NOT craving, NOT suffering\n"
@@ -651,7 +761,14 @@ def _translate_query_to_english(question: str) -> str:
                     "  පටිච්චසමුප්පාද        → dependent origination\n"
                     "  ධර්මය (dharmaya)       → Dhamma — the teaching\n"
                     "  ත්‍රිපිටකය             → Tipitaka — Pali Canon\n"
-                ),
+        )
+
+    payload_2 = {
+        "model":    MODEL_SINHALA,
+        "messages": [
+            {
+                "role":    "system",
+                "content": step2_system,
             },
             {
                 "role":    "user",
@@ -862,6 +979,25 @@ def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
             "- ලිතිකාංක හෝ ලැයිස්තු භාවිත නොකරන්න. ගලා යන, උණුසුම් ගද්‍යයෙන් ලියන්න."
         )
 
+    if lang == "ta":
+        if religion == "Buddhism":
+            return (
+                "- தமிழ் மொழியில் பதில் அளிக்கவும்.\n"
+                "- ஒரு தொடக்கநிலையினர் புரிந்துகொள்ளக்கூடிய எளிமையான, மனித விளக்கத்துடன் தொடங்கவும்.\n"
+                "- மறைநூல் கூறுவதை இயற்கையாக ஆதாரமாக மேற்கோள் காட்டவும் "
+                "(எ.கா. 'சம்யுத்த நிகாயத்தில் காணப்படுவது போல்...').\n"
+                "- போதனையில் நடைமுறை பரிமாணம் இருந்தால், சுருக்கமாக குறிப்பிடவும்.\n"
+                "- புள்ளிகள் அல்லது பட்டியல்களைப் பயன்படுத்தாதீர்கள். இயல்பான, அன்பான உரைநடையில் எழுதவும்."
+            )
+        return (
+            "- தமிழ் மொழியில் பதில் அளிக்கவும்.\n"
+            "- புதியவர்கள் புரிந்துகொள்ளக்கூடிய எளிமையான, மனித விளக்கத்துடன் தொடங்கவும்.\n"
+            "- மறைநூல் கூறுவதை இயற்கையாக ஆதாரமாக மேற்கோள் காட்டவும் "
+            "(எ.கா. 'யோவான் நற்செய்தியில் எழுதியுள்ளது போல்...').\n"
+            "- போதனையில் நடைமுறை அல்லது ஆன்மிக பரிமாணம் இருந்தால், சுருக்கமாக குறிப்பிடவும்.\n"
+            "- புள்ளிகள் அல்லது பட்டியல்களைப் பயன்படுத்தாதீர்கள். இயல்பான, அன்பான உரைநடையில் எழுதவும்."
+        )
+
     # English
     if religion == "Buddhism":
         return (
@@ -1028,9 +1164,27 @@ def _review_translation(
                 "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
             ),
             "Christianity": (
-                "இது ஒரு கிறிஸ்தவ பதில். சரியான கிறிஸ்தவ தமிழ் சொற்களை பயன்படுத்தவும் "
-                "(எ.கா. திரித்துவம், இரட்சிப்பு, விசுவாசம், அன்பு, பைபிள்).\n"
-                "- பௌத்த சொற்களை கிறிஸ்தவ பதிலில் சேர்க்க வேண்டாம்."
+                "இது ஒரு கிறிஸ்தவ பதில். சரியான கிறிஸ்தவ தமிழ் சொற்களை பயன்படுத்தவும்.\n\n"
+                "முக்கியமான மொழிபெயர்ப்பு திருத்தங்கள் (Google Translate பிழைகள்):\n"
+                "  இரட்சிப்பு    → salvation — NOT 'rescue' அல்லது 'escape'\n"
+                "  திரித்துவம்   → Trinity — NOT 'three groups' அல்லது 'trio'\n"
+                "  கிருபை        → grace — divine unmerited favour — NOT just 'kindness'\n"
+                "  மீட்பு        → redemption — NOT 'recovery'\n"
+                "  நித்திய ஜீவன் → eternal life — NOT 'immortality' அல்லது 'endless life'\n"
+                "  விசுவாசம்     → faith — NOT just 'trust' அல்லது 'belief'\n"
+                "  பாவம்         → sin — NOT 'mistake'\n"
+                "  மன்னிப்பு     → forgiveness — NOT 'pardon' in a legal sense\n"
+                "  ஞானஸ்நானம்   → baptism — NOT 'bath' அல்லது 'washing'\n"
+                "  திருவிருந்து  → Holy Communion / Eucharist — NOT 'feast'\n"
+                "  ஜெபம்         → prayer — NOT 'request'\n"
+                "  சுவிசேஷம்    → Gospel — NOT 'good news story'\n"
+                "  திருச்சபை    → Church — NOT just 'assembly'\n"
+                "  பரிசுத்த ஆவி → Holy Spirit — NOT 'holy ghost' in modern usage\n"
+                "  சொர்க்கம்    → heaven — NOT 'sky'\n"
+                "  நரகம்         → hell\n"
+                "  மனந்திரும்புதல் → repentance — NOT 'changing one's mind'\n\n"
+                "- பௌத்த சொற்களை கிறிஸ்தவ பதிலில் சேர்க்க வேண்டாம்.\n"
+                "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
             ),
         }.get(religion, "சரியான மற்றும் இயற்கையான தமிழ் மத சொற்களை பயன்படுத்தவும்.")
 
@@ -1059,8 +1213,26 @@ def _review_translation(
                 "ඇතුළත් නොකරන්න."
             ),
             "Christianity": (
-                "මෙය ක්‍රිස්තියානි පිළිතුරකි. නිවැරදි ක්‍රිස්තියානි සිංහල පාරිභාෂිතය භාවිත කරන්න "
-                "(නිදසුන්: ත්‍රිත්වය, ගැලවීම, ඇදහිල්ල, කරුණාව, ශුද්ධ ලියවිල්ල, බයිබලය).\n"
+                "මෙය ක්‍රිස්තියානි පිළිතුරකි. නිවැරදි ක්‍රිස්තියානි සිංහල පාරිභාෂිතය භාවිත කරන්න.\n\n"
+                "වැදගත් ශබ්ද නිවැරදිකිරීම් (Google Translate සාමාන්‍ය වැරදි):\n"
+                "  ගැලවීම          → salvation — 'escape', 'rescue', 'relief' නොවේ\n"
+                "  ත්‍රිත්වය       → Trinity — 'three groups', 'trio', 'triple' නොවේ\n"
+                "  කරුණාව          → grace (දෛවීය) — 'mercy' පමණ නොවේ\n"
+                "  මිදීම           → redemption — 'freedom' හෝ 'release' පමණ නොවේ\n"
+                "  සදාකාලික ජීවිතය → eternal life — 'everlasting living' නොවේ\n"
+                "  ඇදහිල්ල        → faith — 'trust' හෝ 'belief' පමණ නොවේ\n"
+                "  පාපය            → sin — 'mistake' හෝ 'wrongdoing' නොවේ\n"
+                "  සමාව            → forgiveness — 'excuse' නොවේ\n"
+                "  බාප්තිස්මය      → baptism — 'bathing' හෝ 'washing' නොවේ\n"
+                "  ශුද්ධ කොමියුනියන් → Holy Communion / Eucharist — 'holy meal' නොවේ\n"
+                "  යාච්ඤාව         → prayer — 'request' හෝ 'begging' නොවේ\n"
+                "  සුවිශේෂය         → Gospel — 'good news' පමණ නොවේ\n"
+                "  සභාව             → Church — 'assembly' හෝ 'meeting' පමණ නොවේ\n"
+                "  පරිශුද්ධ ආත්මය  → Holy Spirit — 'holy soul' හෝ 'pure soul' නොවේ\n"
+                "  ස්වර්ගය          → heaven — 'sky' නොවේ\n"
+                "  නිරය             → hell\n"
+                "  පශ්චාත්තාපය      → repentance — 'regret' පමණ නොවේ\n"
+                "  ශුද්ධ ලියවිල්ල  → Bible / scripture\n\n"
                 "- 'ත්‍රිපිටකය', 'නිර්වාණය' හෝ බෞද්ධ සංකල්ප ක්‍රිස්තියානි පිළිතුරක "
                 "ඇතුළත් නොකරන්න."
             ),
@@ -1227,7 +1399,7 @@ def answer_question(
     # context + translate to Tamil
     # ════════════════════════════════════════════════════════════
     if lang == "ta":
-        en_query = _translate_query_to_english(question)
+        en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [ta] EN query: {en_query!r}")
         return _english_context_then_translate(question, en_query, religion, target_lang="ta")
 
@@ -1235,13 +1407,19 @@ def answer_question(
     # SINHALA PATH
     # ════════════════════════════════════════════════════════════
     if lang == "si":
-        from retrieve import search_sinhala_direct
-        from translator import translate_from_english
-
         # Step 1: Translate question to English for FAISS embedding
-        en_query = _translate_query_to_english(question)
+        en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [si] Original question: {question[:80]!r}")
         print(f"  [si] Translated EN query: {en_query!r}")
+
+        # Christianity has no Sinhala scripture data — go straight to
+        # the English-context + translate path.
+        if religion == "Christianity":
+            print("  [si] Christianity — no Sinhala scripture DB, using English context + translation")
+            return _english_context_then_translate(question, en_query, religion, target_lang="si")
+
+        from retrieve import search_sinhala_direct
+        from translator import translate_from_english
 
         # Step 2: Check for relevant Sinhala chunks in DB
         si_results = search_sinhala_direct(en_query, religion=religion)
