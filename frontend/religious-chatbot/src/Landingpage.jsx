@@ -48,6 +48,52 @@ export const RELIGIONS = {
     watermark:   "Cross",
     loadingMsg:  "Preparing scripture from the Holy Bible…",
   },
+  Hinduism: {
+    label:       "Hinduism",
+    emoji:       "🕉️",
+    botEmoji:    "🪔",
+    accentColor: "#e85d26",
+    accentDark:  "#9c3210",
+    bgColor:     "#fdf1e8",
+    sidebarBg:   "#f5dfc8",
+    border:      "#e8c49a",
+    headerBg:    "#fef8f2",
+    botBubble:   "#fff5ed",
+    inputBg:     "#fef8f2",
+    hover:       "#f5d9b8",
+    text:        "#3d1a08",
+    textMuted:   "#8a4a22",
+    gradient:    "linear-gradient(135deg, #fdf1e8 0%, #f5dfc8 100%)",
+    cardGlow:    "#e85d2644",
+    description: "Explore the eternal wisdom of the Vedas, Upanishads, and Bhagavad Gita.",
+    placeholder: "Ask about dharma, karma, yoga, or Hindu philosophy…",
+    watermark:   "Om",
+    loadingMsg:  "Preparing sacred texts from the Vedic scriptures…",
+    comingSoon:  true,
+  },
+  Islam: {
+    label:       "Islam",
+    emoji:       "☪️",
+    botEmoji:    "🌙",
+    accentColor: "#2d8a5e",
+    accentDark:  "#1a5438",
+    bgColor:     "#edf6f1",
+    sidebarBg:   "#cfe8da",
+    border:      "#9ecfb8",
+    headerBg:    "#f5fbf8",
+    botBubble:   "#edfaf3",
+    inputBg:     "#f5fbf8",
+    hover:       "#bde4cf",
+    text:        "#0e2d1e",
+    textMuted:   "#3a7058",
+    gradient:    "linear-gradient(135deg, #edf6f1 0%, #cfe8da 100%)",
+    cardGlow:    "#2d8a5e44",
+    description: "Discover the teachings of the Quran — guidance, mercy, and the path of Islam.",
+    placeholder: "Ask about the Quran, prayer, or Islamic teaching…",
+    watermark:   "Crescent",
+    loadingMsg:  "Preparing scripture from the Holy Quran…",
+    comingSoon:  true,
+  },
 };
 
 // ─── Watermark SVGs ───────────────────────────────────────────
@@ -83,8 +129,39 @@ const CrossSVG = ({ color }) => (
   </svg>
 );
 
-export const WatermarkSVG = ({ type, color }) =>
-  type === "Cross" ? <CrossSVG color={color} /> : <DharmaWheelSVG color={color} />;
+const OmSVG = ({ color }) => (
+  <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", height: "100%" }}>
+    <circle cx="100" cy="100" r="88" stroke={color} strokeWidth="3" fill="none" opacity="0.18" />
+    <text x="50%" y="55%" dominantBaseline="middle" textAnchor="middle"
+      fontSize="110" fontFamily="serif" fill={color} opacity="0.3">ॐ</text>
+    {[0,45,90,135,180,225,270,315].map((a,i) => {
+      const r=(a*Math.PI)/180, cx=100+78*Math.cos(r), cy=100+78*Math.sin(r);
+      return <circle key={i} cx={cx} cy={cy} r="4" fill={color} opacity="0.15"/>;
+    })}
+  </svg>
+);
+
+const CrescentSVG = ({ color }) => (
+  <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", height: "100%" }}>
+    <circle cx="100" cy="100" r="88" stroke={color} strokeWidth="3" fill="none" opacity="0.18" />
+    <circle cx="96" cy="100" r="52" fill={color} opacity="0.22" />
+    <circle cx="116" cy="92" r="42" fill="#16213e" opacity="0.85" />
+    <polygon points="148,54 151,63 161,63 153,69 156,78 148,72 140,78 143,69 135,63 145,63"
+      fill={color} opacity="0.35" />
+    {[0,60,120,180,240,300].map((a,i) => {
+      const r=(a*Math.PI)/180, cx=100+78*Math.cos(r), cy=100+78*Math.sin(r);
+      return <circle key={i} cx={cx} cy={cy} r="3" fill={color} opacity="0.18"/>;
+    })}
+  </svg>
+);
+
+export const WatermarkSVG = ({ type, color }) => {
+  if (type === "Cross")    return <CrossSVG color={color} />;
+  if (type === "Om")       return <OmSVG color={color} />;
+  if (type === "Crescent") return <CrescentSVG color={color} />;
+  return <DharmaWheelSVG color={color} />;
+};
+
 
 // ─── Religion Selection Page ──────────────────────────────────
 const ReligionSelectPage = ({ onSelect }) => {
@@ -95,8 +172,9 @@ const ReligionSelectPage = ({ onSelect }) => {
       minHeight: "100vh", width: "100vw",
       background: "linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
       display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      fontFamily: "'Lora', Georgia, serif", padding: 24,
+      alignItems: "center", justifyContent: "flex-start",
+      fontFamily: "'Lora', Georgia, serif", padding: "60px 24px 24px",
+      overflowX: "hidden",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
@@ -125,19 +203,34 @@ const ReligionSelectPage = ({ onSelect }) => {
       <div style={{ display: "flex", gap: 28, flexWrap: "wrap", justifyContent: "center", animation: "fadeIn 0.8s ease" }}>
         {Object.entries(RELIGIONS).map(([key, cfg]) => (
           <div key={key} className="rel-card"
-            onMouseEnter={() => setHovered(key)}
+            onMouseEnter={() => !cfg.comingSoon && setHovered(key)}
             onMouseLeave={() => setHovered(null)}
-            onClick={() => onSelect(key)}
+            onClick={() => !cfg.comingSoon && onSelect(key)}
             style={{
               width: 260, borderRadius: 20,
               background: hovered === key ? `linear-gradient(145deg, ${cfg.bgColor}, ${cfg.hover})` : "rgba(255,255,255,0.06)",
-              border: `2px solid ${hovered === key ? cfg.accentColor : "rgba(255,255,255,0.12)"}`,
+              border: `2px solid ${hovered === key ? cfg.accentColor : cfg.comingSoon ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.12)"}`,
               padding: "36px 28px 28px",
               display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
               boxShadow: hovered === key ? `0 20px 50px ${cfg.cardGlow}, 0 0 0 1px ${cfg.accentColor}33` : "0 8px 32px rgba(0,0,0,0.3)",
               backdropFilter: "blur(12px)",
+              opacity: cfg.comingSoon ? 0.55 : 1,
+              cursor: cfg.comingSoon ? "default" : "pointer",
+              position: "relative", overflow: "hidden",
             }}
           >
+            {cfg.comingSoon && (
+              <div style={{
+                position: "absolute", top: 14, right: -24,
+                background: "linear-gradient(135deg, #667eea, #764ba2)",
+                color: "#fff", fontSize: 9.5, fontFamily: "'Cinzel', serif",
+                letterSpacing: 1.5, padding: "4px 32px",
+                transform: "rotate(35deg)", transformOrigin: "center",
+                boxShadow: "0 2px 8px #0004",
+              }}>
+                SOON
+              </div>
+            )}
             <div style={{ width: 80, height: 80 }}>
               <WatermarkSVG type={cfg.watermark} color={cfg.accentColor} />
             </div>
@@ -150,21 +243,84 @@ const ReligionSelectPage = ({ onSelect }) => {
             </p>
             <div style={{
               marginTop: 6, padding: "9px 24px", borderRadius: 30,
-              background: hovered === key ? `linear-gradient(135deg, ${cfg.accentColor}, ${cfg.accentDark})` : "rgba(255,255,255,0.1)",
-              color: hovered === key ? "#fff" : "#aabbdd",
+              background: cfg.comingSoon ? "rgba(255,255,255,0.06)" : hovered === key ? `linear-gradient(135deg, ${cfg.accentColor}, ${cfg.accentDark})` : "rgba(255,255,255,0.1)",
+              color: cfg.comingSoon ? "#445566" : hovered === key ? "#fff" : "#aabbdd",
               fontSize: 12, fontFamily: "'Cinzel', serif", letterSpacing: 1,
-              border: `1px solid ${hovered === key ? "transparent" : "rgba(255,255,255,0.15)"}`,
+              border: `1px solid ${hovered === key && !cfg.comingSoon ? "transparent" : "rgba(255,255,255,0.15)"}`,
               transition: "all 0.2s",
             }}>
-              Enter →
+              {cfg.comingSoon ? "Coming Soon" : "Enter →"}
             </div>
           </div>
         ))}
       </div>
 
-      <p style={{ marginTop: 48, fontSize: 11, color: "#445566", letterSpacing: 1, fontFamily: "'Cinzel', serif" }}>
-        MORE TRADITIONS COMING SOON
-      </p>
+      {/* ── Help Us Section ───────────────────────────────── */}
+      <div style={{
+        marginTop: 80, width: "100%", maxWidth: 700,
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+        paddingTop: 60, paddingBottom: 40,
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
+        animation: "fadeIn 1s ease",
+      }}>
+        <div style={{ fontSize: 22, letterSpacing: 3, color: "#667eea", fontFamily: "'Cinzel', serif", fontWeight: 600 }}>
+          ✦ Help Us Grow ✦
+        </div>
+        <h2 style={{
+          fontSize: "clamp(20px, 3.5vw, 30px)", fontFamily: "'Cinzel', serif",
+          fontWeight: 700, color: "#e8eaf6", letterSpacing: 1, textAlign: "center",
+          textShadow: "0 2px 20px #0006",
+        }}>
+          Support Multi-Religious AI for Everyone
+        </h2>
+        <p style={{
+          fontSize: 14.5, color: "#7788aa", maxWidth: 520, textAlign: "center",
+          lineHeight: 1.8, fontFamily: "'Lora', Georgia, serif",
+        }}>
+          We're building scripture-grounded AI guides for all major world religions —
+          Buddhism, Christianity, Islam, Hinduism, and beyond. Your support helps us expand
+          scripture datasets, improve accuracy, and reach more people seeking spiritual guidance.
+        </p>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
+          {["🌍 Multi-language support", "📖 More scriptures", "🤲 Free for all"].map((feat, i) => (
+            <div key={i} style={{
+              padding: "6px 16px", borderRadius: 20,
+              border: "1px solid rgba(102,126,234,0.3)",
+              background: "rgba(102,126,234,0.08)",
+              fontSize: 12, color: "#8899cc", fontFamily: "'Lora', serif",
+            }}>
+              {feat}
+            </div>
+          ))}
+        </div>
+        <a
+          href="https://fund.syetalabs.org/en/explore/multi-religious-ai-platform"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            marginTop: 12,
+            padding: "14px 40px",
+            borderRadius: 40,
+            background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: "#fff",
+            fontSize: 14,
+            fontFamily: "'Cinzel', serif",
+            letterSpacing: 1.5,
+            fontWeight: 600,
+            textDecoration: "none",
+            boxShadow: "0 8px 32px rgba(102,126,234,0.4), 0 0 0 1px rgba(255,255,255,0.1)",
+            transition: "transform 0.2s, box-shadow 0.2s",
+            display: "inline-block",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "0 14px 40px rgba(102,126,234,0.55), 0 0 0 1px rgba(255,255,255,0.15)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 8px 32px rgba(102,126,234,0.4), 0 0 0 1px rgba(255,255,255,0.1)"; }}
+        >
+          🙏 Support Our Mission
+        </a>
+        <p style={{ fontSize: 11, color: "#334455", fontFamily: "'Cinzel', serif", letterSpacing: 1 }}>
+          Every contribution makes a difference
+        </p>
+      </div>
     </div>
   );
 };
