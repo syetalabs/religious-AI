@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { RELIGIONS, WatermarkSVG } from "./Landingpage";
+import {
+  FaChevronLeft, FaChevronRight, FaPlus, FaRightLeft,
+  FaGlobe, FaBookOpen, FaTriangleExclamation, FaXmark,
+  FaCircleXmark, FaPaperPlane, FaSpinner,
+} from "react-icons/fa6";
+import { MdError } from "react-icons/md";
+import { RELIGIONS, ReligionSymbol } from "./Landingpage";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://religious-ai.onrender.com";
 const ALL_LANGUAGES = ["English", "Sinhala", "Tamil"];
@@ -17,14 +23,14 @@ const UserAvatar = ({ name = "User", size = 32, palette }) => (
   </div>
 );
 
-const BotAvatar = ({ size = 32, emoji }) => (
+const BotAvatar = ({ size = 32, symbolKey, accentColor }) => (
   <div style={{
     width: size, height: size, borderRadius: "50%",
-    background: "linear-gradient(135deg, #e8e8e8, #c0c0c0)",
+    background: "linear-gradient(135deg, #e8e8e8, #c8c8c8)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    flexShrink: 0, fontSize: size * 0.55,
+    flexShrink: 0,
   }}>
-    {emoji}
+    <ReligionSymbol symbolKey={symbolKey} size={Math.round(size * 0.52)} color={accentColor} opacity={0.85} />
   </div>
 );
 
@@ -39,7 +45,10 @@ const SourcePills = ({ sources, palette }) => {
           background: palette.hover, color: palette.accentDark,
           border: `1px solid ${palette.border}`,
           fontFamily: "'Cinzel', serif", letterSpacing: 0.5,
-        }}>📖 {src}</span>
+          display: "flex", alignItems: "center", gap: 5,
+        }}>
+          <FaBookOpen size={9} /> {src}
+        </span>
       ))}
     </div>
   );
@@ -49,9 +58,10 @@ const ConfidenceWarning = () => (
   <div style={{
     marginTop: 8, fontSize: 11, color: "#a0622a",
     background: "#fff3e0", border: "1px solid #f5c78e",
-    borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 5,
+    borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 6,
   }}>
-    ⚠️ Low confidence — please verify this with a religious scholar.
+    <FaTriangleExclamation size={10} />
+    Low confidence — please verify this with a religious scholar.
   </div>
 );
 
@@ -62,8 +72,14 @@ const ErrorToast = ({ message, onClose }) => (
     borderRadius: 12, fontSize: 13, zIndex: 999,
     boxShadow: "0 4px 20px #0004", display: "flex", alignItems: "center", gap: 10,
   }}>
-    ❌ {message}
-    <button onClick={onClose} style={{ background: "none", border: "none", color: "#ffd5d5", cursor: "pointer", fontSize: 16 }}>×</button>
+    <FaCircleXmark size={14} color="#ffd5d5" />
+    {message}
+    <button onClick={onClose} style={{
+      background: "none", border: "none", color: "#ffd5d5",
+      cursor: "pointer", display: "flex", alignItems: "center",
+    }}>
+      <FaXmark size={14} />
+    </button>
   </div>
 );
 
@@ -71,7 +87,6 @@ const ErrorToast = ({ message, onClose }) => (
 export default function Chatbot({ religion, onSwitchReligion }) {
   const cfg = RELIGIONS[religion] || RELIGIONS.Buddhism;
 
-  // Auto-close sidebar on mobile (viewport < 640px)
   const isMobile = () => typeof window !== "undefined" && window.innerWidth < 640;
   const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile());
   const [messages, setMessages]                 = useState([]);
@@ -86,10 +101,8 @@ export default function Chatbot({ religion, onSwitchReligion }) {
   const messagesEndRef = useRef(null);
   const inputRef       = useRef(null);
 
-  // All religions now support English, Sinhala, and Tamil
   const availableLanguages = ALL_LANGUAGES;
 
-  // Ping /health on mount so the connection indicator updates immediately
   useEffect(() => {
     fetch(`${API_BASE}/health`)
       .then(r => r.json())
@@ -97,11 +110,8 @@ export default function Chatbot({ religion, onSwitchReligion }) {
       .catch(() => setIsConnected(false));
   }, []);
 
-  // Close sidebar when window resizes to mobile
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 640) setSidebarOpen(false);
-    };
+    const handleResize = () => { if (window.innerWidth < 640) setSidebarOpen(false); };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
@@ -177,30 +187,29 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         ::-webkit-scrollbar-thumb { background: ${cfg.accentColor}55; border-radius: 4px; }
         .chat-input:focus { outline: none; }
         .sidebar-btn:hover { background: ${cfg.hover} !important; }
-        .recent-item:hover { background: ${cfg.hover} !important; }
         .lang-opt:hover    { background: ${cfg.hover} !important; }
         .icon-btn:hover    { background: ${cfg.hover}88 !important; }
         @keyframes fadeUp  { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse   { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
         @keyframes connPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .msg-anim { animation: fadeUp 0.35s ease forwards; }
         .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${cfg.accentColor}; animation: pulse 1.2s infinite; margin: 0 2px; }
         .dot:nth-child(2) { animation-delay: 0.2s; }
         .dot:nth-child(3) { animation-delay: 0.4s; }
         .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .send-btn:not(:disabled):hover { opacity: 0.85; }
+        .spinner { animation: spin 0.9s linear infinite; }
       `}</style>
 
-      {/* Sidebar — overlays on mobile, pushes content on desktop */}
+      {/* Sidebar overlay on mobile */}
       {sidebarOpen && isMobile() && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          style={{
-            position: "fixed", inset: 0, background: "#0005",
-            zIndex: 20, backdropFilter: "blur(1px)",
-          }}
-        />
+        <div onClick={() => setSidebarOpen(false)} style={{
+          position: "fixed", inset: 0, background: "#0005",
+          zIndex: 20, backdropFilter: "blur(1px)",
+        }} />
       )}
+
       <div style={{
         width: sidebarOpen ? 220 : 0, minWidth: sidebarOpen ? 220 : 0,
         background: cfg.sidebarBg, borderRight: `1px solid ${cfg.border}`,
@@ -212,8 +221,8 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         zIndex: isMobile() ? 30 : 10,
       }}>
         <div style={{ padding: "20px 14px 80px", opacity: sidebarOpen ? 1 : 0, transition: "opacity 0.2s", height: "100%" }}>
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <div style={{ fontSize: 28, marginBottom: 4 }}>{cfg.emoji}</div>
+          <div style={{ textAlign: "center", marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <ReligionSymbol symbolKey={cfg.symbolKey} size={36} color={cfg.accentColor} opacity={0.8} />
             <div style={{ fontSize: 11, fontFamily: "'Cinzel', serif", letterSpacing: 1, color: cfg.textMuted }}>{cfg.label}</div>
           </div>
 
@@ -224,7 +233,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
             cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
             marginBottom: 8, transition: "background 0.2s",
           }}>
-            <span style={{ fontSize: 16 }}>✦</span> New Chat
+            <FaPlus size={13} /> New Chat
           </button>
 
           <button className="sidebar-btn" onClick={onSwitchReligion} style={{
@@ -234,7 +243,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
             cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
             marginBottom: 16, transition: "background 0.2s",
           }}>
-            <span style={{ fontSize: 14 }}>⇄</span> Switch Religion
+            <FaRightLeft size={13} /> Switch Religion
           </button>
         </div>
 
@@ -271,12 +280,12 @@ export default function Chatbot({ religion, onSwitchReligion }) {
             width: 36, height: 36, border: `1px solid ${cfg.border}`,
             borderRadius: 8, background: "transparent", cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: cfg.textMuted, fontSize: 16, transition: "background 0.15s",
+            color: cfg.textMuted, transition: "background 0.15s",
           }}>
-            {sidebarOpen ? "◁" : "▷"}
+            {sidebarOpen ? <FaChevronLeft size={14} /> : <FaChevronRight size={14} />}
           </button>
 
-          <BotAvatar size={34} emoji={cfg.botEmoji} />
+          <BotAvatar size={34} symbolKey={cfg.symbolKey} accentColor={cfg.accentColor} />
 
           <div style={{ flex: 1 }} />
 
@@ -289,7 +298,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
               color: cfg.accentDark, cursor: "pointer",
               display: "flex", alignItems: "center", gap: 6, transition: "background 0.15s",
             }}>
-              🌐 {language} <span style={{ fontSize: 10 }}>▾</span>
+              <FaGlobe size={12} /> {language} <span style={{ fontSize: 10 }}>▾</span>
             </button>
             {showLangDropdown && (
               <div style={{
@@ -320,19 +329,21 @@ export default function Chatbot({ religion, onSwitchReligion }) {
             borderRadius: 20, background: "transparent",
             fontFamily: "'Lora', serif", fontSize: 12.5,
             color: cfg.textMuted, cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 6,
           }}>
-            ⇄ Religion
+            <FaRightLeft size={12} /> Religion
           </button>
         </div>
 
         {/* Chat Area */}
         <div style={{ flex: 1, overflowY: "auto", padding: "28px clamp(12px, 5%, 10%)", position: "relative" }}>
+          {/* Faint watermark */}
           <div style={{
             position: "absolute", top: "50%", left: "50%",
             transform: "translate(-50%, -50%)",
-            width: 320, height: 320, pointerEvents: "none", opacity: 0.18, zIndex: 0,
+            pointerEvents: "none", opacity: 0.05, zIndex: 0,
           }}>
-            <WatermarkSVG type={cfg.watermark} color={cfg.accentColor} />
+            <ReligionSymbol symbolKey={cfg.symbolKey} size={280} color={cfg.accentColor} />
           </div>
 
           {messages.length === 0 && !isTyping && (
@@ -340,8 +351,9 @@ export default function Chatbot({ religion, onSwitchReligion }) {
               position: "absolute", top: "50%", left: "50%",
               transform: "translate(-50%, -50%)",
               textAlign: "center", color: cfg.textMuted, zIndex: 1, pointerEvents: "none",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 14,
             }}>
-              <div style={{ fontSize: 38, marginBottom: 12 }}>{cfg.botEmoji}</div>
+              <ReligionSymbol symbolKey={cfg.symbolKey} size={48} color={cfg.accentColor} opacity={0.3} />
               <div style={{ fontFamily: "'Cinzel', serif", fontSize: 14, letterSpacing: 1 }}>{cfg.placeholder}</div>
             </div>
           )}
@@ -354,7 +366,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
                 alignItems: "flex-end", gap: 10,
               }}>
                 {msg.role === "bot"
-                  ? <BotAvatar size={30} emoji={cfg.botEmoji} />
+                  ? <BotAvatar size={30} symbolKey={cfg.symbolKey} accentColor={cfg.accentColor} />
                   : <UserAvatar name="U" size={30} palette={cfg} />}
                 <div style={{ maxWidth: "min(58%, 480px)", display: "flex", flexDirection: "column" }}>
                   <div style={{
@@ -377,7 +389,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
 
             {isTyping && (
               <div className="msg-anim" style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
-                <BotAvatar size={30} emoji={cfg.botEmoji} />
+                <BotAvatar size={30} symbolKey={cfg.symbolKey} accentColor={cfg.accentColor} />
                 <div style={{
                   background: cfg.botBubble, borderRadius: "18px 18px 18px 4px",
                   padding: "14px 18px", border: `1px solid ${cfg.border}`,
@@ -399,8 +411,9 @@ export default function Chatbot({ religion, onSwitchReligion }) {
               padding: "8px 14px", marginBottom: 10, fontSize: 12,
               color: "#a0622a", display: "flex", alignItems: "center", gap: 8,
             }}>
-              ⚠️ Backend offline — check{" "}
-              <a href={`${API_BASE}/health`} target="_blank" rel="noreferrer" style={{ color: "#8b6914" }}>health status</a>
+              <FaTriangleExclamation size={12} />
+              Backend offline —{" "}
+              <a href={`${API_BASE}/health`} target="_blank" rel="noreferrer" style={{ color: "#8b6914" }}>check health status</a>
             </div>
           )}
           <div style={{
@@ -428,11 +441,13 @@ export default function Chatbot({ religion, onSwitchReligion }) {
             <button className="send-btn" onClick={handleSend} disabled={!input.trim() || isTyping} style={{
               width: 36, height: 36,
               background: `linear-gradient(135deg, ${cfg.accentColor}, ${cfg.accentDark})`,
-              border: "none", borderRadius: 10, cursor: "pointer", color: "#fff", fontSize: 16,
+              border: "none", borderRadius: 10, cursor: "pointer", color: "#fff",
               display: "flex", alignItems: "center", justifyContent: "center",
               boxShadow: `0 3px 12px ${cfg.cardGlow}`, transition: "opacity 0.15s",
             }}>
-              {isTyping ? "⏳" : "➤"}
+              {isTyping
+                ? <FaSpinner size={14} className="spinner" />
+                : <FaPaperPlane size={13} />}
             </button>
           </div>
         </div>
