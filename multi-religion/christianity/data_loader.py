@@ -1,8 +1,12 @@
+import io
 import json
+import re
 import time
+import zipfile
 from pathlib import Path
 
 import requests
+from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -19,24 +23,45 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Bible API settings
+# Bible API settings (English KJV via bible-api.com)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 BIBLE_API_BASE  = "https://bible-api.com"
-TRANSLATION     = "kjv"          # King James Version — public domain, clean text
-REQUEST_DELAY   = 1.5            # bible-api.com allows ~40 req/min; 1.5s is safe
-TIMEOUT         = 15
-MAX_RETRIES     = 6              # more retries to ride out 429 bursts
+TRANSLATION     = "kjv"
+REQUEST_DELAY   = 1.5
+TIMEOUT         = 30
+MAX_RETRIES     = 6
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": "MultiReligiousChatbot/3.0 (educational use)"})
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Wordproject offline zips — no API key, no login required
+# To add more languages, just add an entry: "lang_code": "zip_url"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Maps our language key -> Wordproject zip URL
+WP_LANGUAGES: dict[str, str] = {
+    "si": "https://www.wordpocket.org/bibles/download_zip/si_new.zip",
+    "ta": "https://www.wordpocket.org/bibles/download_zip/tm_new.zip",
+}
+
+# Maps our language key -> folder name INSIDE the zip (may differ from our key)
+WP_LANG_FOLDER: dict[str, str] = {
+    "si": "si",
+    "ta": "tm",   # Wordproject uses "tm" for Tamil internally
+}
+
+def _wp_zip_path(lang: str) -> Path:
+    return DATA_DIR / f"{lang}_new.zip"
+
+def _wp_html_dir(lang: str) -> Path:
+    return DATA_DIR / f"{lang}_html"
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Bible canon — all 66 books with chapter counts
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Format: "Book Name": num_chapters
-# Names match bible-api.com's accepted query strings
 OLD_TESTAMENT: dict[str, int] = {
     "Genesis": 50, "Exodus": 40, "Leviticus": 27, "Numbers": 36,
     "Deuteronomy": 34, "Joshua": 24, "Judges": 21, "Ruth": 4,
@@ -62,14 +87,15 @@ NEW_TESTAMENT: dict[str, int] = {
 
 ALL_BOOKS: dict[str, int] = {**OLD_TESTAMENT, **NEW_TESTAMENT}
 
-# Human-readable section keys (used as section IDs in chunks)
-SECTION_LABELS: dict[str, str] = {
-    book: book for book in ALL_BOOKS
-}
-
 TESTAMENT_MAP: dict[str, str] = {
     **{book: "Old Testament" for book in OLD_TESTAMENT},
     **{book: "New Testament" for book in NEW_TESTAMENT},
+}
+
+# Wordproject uses a 2-digit numeric folder per book (01=Genesis … 66=Revelation)
+_BOOK_TO_WP_NUM: dict[str, str] = {
+    book: str(i).zfill(2)
+    for i, book in enumerate(ALL_BOOKS.keys(), start=1)
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -77,27 +103,16 @@ TESTAMENT_MAP: dict[str, str] = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _safe_replace(src: str, dst: str):
-    """
-    Atomically replace `dst` with `src`.
-    Falls back through three strategies to handle Windows PermissionError (WinError 5).
-    """
-    src_p = Path(src)
-    dst_p = Path(dst)
-    # Strategy 1: standard atomic replace (Linux/macOS always works)
+    src_p, dst_p = Path(src), Path(dst)
     try:
-        src_p.replace(dst_p)
-        return
+        src_p.replace(dst_p); return
     except PermissionError:
         pass
-    # Strategy 2: delete target first, then rename
     try:
-        if dst_p.exists():
-            dst_p.unlink()
-        src_p.rename(dst_p)
-        return
+        if dst_p.exists(): dst_p.unlink()
+        src_p.rename(dst_p); return
     except OSError:
         pass
-    # Strategy 3: plain copy + remove (non-atomic but always works)
     try:
         dst_p.write_bytes(src_p.read_bytes())
         src_p.unlink(missing_ok=True)
@@ -111,12 +126,9 @@ def _get_json(url: str) -> dict | None:
             resp = _session.get(url, timeout=TIMEOUT)
             if resp.status_code == 404:
                 return None
-            if resp.status_code not in (200, 429):
-                print(f"  [debug] HTTP {resp.status_code} | body: {resp.text[:300]}", flush=True)
             if resp.status_code == 429:
-                retry_after = int(resp.headers.get("Retry-After", 0))
-                wait = retry_after if retry_after > 0 else min(15 * attempt, 120)
-                print(f"  [429] rate-limited — waiting {wait}s (attempt {attempt}/{MAX_RETRIES})", flush=True)
+                wait = int(resp.headers.get("Retry-After", 0)) or min(15 * attempt, 120)
+                print(f"  [429] waiting {wait}s (attempt {attempt}/{MAX_RETRIES})", flush=True)
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
@@ -124,19 +136,14 @@ def _get_json(url: str) -> dict | None:
             try:
                 return resp.json()
             except Exception:
-                print(f"  [debug] non-JSON ({resp.status_code}): {resp.text[:300]}", flush=True)
                 return None
         except requests.exceptions.Timeout:
-            print(f"  [timeout] attempt {attempt}/{MAX_RETRIES}: {url}", flush=True)
-            if attempt < MAX_RETRIES:
-                time.sleep(2 ** attempt)
+            if attempt < MAX_RETRIES: time.sleep(2 ** attempt)
         except requests.exceptions.ConnectionError as exc:
-            print(f"  [connection-error] attempt {attempt}/{MAX_RETRIES}: {exc}", flush=True)
-            if attempt < MAX_RETRIES:
-                time.sleep(2 ** attempt)
+            print(f"  [connection-error] {exc}", flush=True)
+            if attempt < MAX_RETRIES: time.sleep(2 ** attempt)
         except requests.exceptions.HTTPError as exc:
             code = exc.response.status_code
-            print(f"  [http {code}] attempt {attempt}/{MAX_RETRIES}: {url}", flush=True)
             if 500 <= code < 600 and attempt < MAX_RETRIES:
                 time.sleep(2 ** attempt)
             else:
@@ -144,99 +151,195 @@ def _get_json(url: str) -> dict | None:
         except Exception as exc:
             print(f"  [error] {type(exc).__name__}: {exc}", flush=True)
             return None
-    print(f"  [gave-up] all {MAX_RETRIES} attempts failed: {url}", flush=True)
     return None
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Bible API fetcher
+# English KJV fetcher (bible-api.com)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Compact slugs used by bible-api.com for books with numbers/spaces in the name.
 _BOOK_SLUG: dict[str, str] = {
-    "1 Samuel":        "1samuel",
-    "2 Samuel":        "2samuel",
-    "1 Kings":         "1kings",
-    "2 Kings":         "2kings",
-    "1 Chronicles":    "1chronicles",
-    "2 Chronicles":    "2chronicles",
-    "1 Corinthians":   "1corinthians",
-    "2 Corinthians":   "2corinthians",
-    "1 Thessalonians": "1thessalonians",
-    "2 Thessalonians": "2thessalonians",
-    "1 Timothy":       "1timothy",
-    "2 Timothy":       "2timothy",
-    "1 Peter":         "1peter",
-    "2 Peter":         "2peter",
-    "1 John":          "1john",
-    "2 John":          "2john",
-    "3 John":          "3john",
+    "1 Samuel": "1samuel", "2 Samuel": "2samuel",
+    "1 Kings": "1kings", "2 Kings": "2kings",
+    "1 Chronicles": "1chronicles", "2 Chronicles": "2chronicles",
+    "1 Corinthians": "1corinthians", "2 Corinthians": "2corinthians",
+    "1 Thessalonians": "1thessalonians", "2 Thessalonians": "2thessalonians",
+    "1 Timothy": "1timothy", "2 Timothy": "2timothy",
+    "1 Peter": "1peter", "2 Peter": "2peter",
+    "1 John": "1john", "2 John": "2john", "3 John": "3john",
     "Song of Solomon": "songofsolomon",
 }
 
-# For single-chapter books, bible-api.com whole-book queries are unreliable.
-# Instead we use an explicit verse-range request: "<slug>+1:1-<N>"
-# which is unambiguous and always returns the full verse array.
 _SINGLE_CHAPTER_VERSE_COUNT: dict[str, int] = {
-    "Obadiah":  21,
-    "Philemon": 25,
-    "2 John":   13,
-    "3 John":   14,
-    "Jude":     25,
+    "Obadiah": 21, "Philemon": 25, "2 John": 13, "3 John": 14, "Jude": 25,
 }
 
 
-def _build_url(book: str, chapter: int, total_chapters: int) -> str:
+def _build_url(book: str, chapter: int) -> str:
     slug = _BOOK_SLUG.get(book, book)
-    # Normal multi-chapter fetch: "1corinthians+13"
     path = f"{slug}+{chapter}".replace(" ", "+")
     return f"{BIBLE_API_BASE}/{path}?translation={TRANSLATION}"
 
 
 def _build_verse_url(book: str, chapter: int, verse: int) -> str:
-    """Build a single-verse URL: e.g. https://bible-api.com/3john+1:3?translation=kjv"""
     slug = _BOOK_SLUG.get(book, book)
     path = f"{slug}+{chapter}:{verse}".replace(" ", "+")
     return f"{BIBLE_API_BASE}/{path}?translation={TRANSLATION}"
 
 
 def _parse_verses(data: dict) -> list[str]:
-    verses = []
-    for v in data.get("verses", []):
-        text      = v.get("text", "").strip()
-        verse_num = v.get("verse", "")
-        if text:
-            verses.append(f"{verse_num} {text}")
-    return verses
+    return [
+        f"{v.get('verse', '')} {v.get('text', '').strip()}"
+        for v in data.get("verses", [])
+        if v.get("text", "").strip()
+    ]
 
 
-def fetch_chapter(book: str, chapter: int, total_chapters: int) -> list[str]:
-    """
-    Fetch all verses from a chapter via bible-api.com.
-
-    Single-chapter books use a verse-by-verse loop to avoid all URL ambiguity —
-    range queries like '3john+1:1-15' are unreliable on this API.
-    Multi-chapter books use the standard chapter-level request.
-    """
+def fetch_chapter_en(book: str, chapter: int, total_chapters: int) -> list[str]:
     if total_chapters == 1:
-        # Fetch verse by verse — guaranteed unambiguous for all single-chapter books
         n_verses = _SINGLE_CHAPTER_VERSE_COUNT.get(book, 30)
         all_verses = []
         for v_num in range(1, n_verses + 1):
-            url  = _build_verse_url(book, chapter, v_num)
-            data = _get_json(url)
+            data = _get_json(_build_verse_url(book, chapter, v_num))
             if data and "verses" in data:
-                parsed = _parse_verses(data)
-                all_verses.extend(parsed)
+                all_verses.extend(_parse_verses(data))
             else:
-                # Stop early if verse doesn't exist (handles books with fewer verses than estimated)
                 break
         return all_verses
     else:
-        url  = _build_url(book, chapter, total_chapters)
-        data = _get_json(url)
-        if not data or "verses" not in data:
-            return []
-        return _parse_verses(data)
+        data = _get_json(_build_url(book, chapter))
+        return _parse_verses(data) if data and "verses" in data else []
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wordproject offline zip fetcher — works for any language (si, ta, etc.)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _download_wp_zip(lang: str):
+    """Download a Wordproject Bible zip once and cache it locally."""
+    zip_path = _wp_zip_path(lang)
+    zip_url  = WP_LANGUAGES[lang]
+    if zip_path.exists() and zip_path.stat().st_size > 100_000:
+        print(f"  ✓ {lang.upper()} zip already downloaded ({zip_path.name})")
+        return
+    print(f"  📥 Downloading {lang.upper()} Bible zip from Wordproject…")
+    print(f"     URL: {zip_url}")
+    resp = _session.get(zip_url, timeout=120, stream=True)
+    resp.raise_for_status()
+    total = int(resp.headers.get("content-length", 0))
+    with open(zip_path, "wb") as f, tqdm(
+        total=total, unit="B", unit_scale=True, desc=f"  Downloading ({lang})"
+    ) as bar:
+        for chunk in resp.iter_content(chunk_size=8192):
+            f.write(chunk)
+            bar.update(len(chunk))
+    print(f"  ✓ Saved → {zip_path}")
+
+
+def _extract_wp_zip(lang: str):
+    """Extract the zip into DATA_DIR/<lang>_html/ if not already done."""
+    html_dir = _wp_html_dir(lang)
+    if html_dir.exists() and any(html_dir.rglob("*.htm")):
+        print(f"  ✓ {lang.upper()} HTML files already extracted")
+        return
+    print(f"  📂 Extracting {lang.upper()} Bible zip…")
+    html_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(_wp_zip_path(lang), "r") as zf:
+        zf.extractall(html_dir)
+    htm_count = len(list(html_dir.rglob("*.htm")))
+    print(f"  ✓ Extracted {htm_count} HTML files → {html_dir}")
+
+
+def _parse_wp_chapter_html(html_content: str) -> list[str]:
+    """
+    Parse a Wordproject chapter HTML file and return verse strings.
+    Format: "VERSE_NUM verse text here"
+
+    Structure (confirmed from actual files):
+      <div id="textBody">
+        <p>
+          <span class="verse" id="1">1 </span>verse text...
+          <br/>
+          <span class="verse" id="2">2 </span>verse text...
+          ...
+        </p>
+      </div>
+
+    Verses are <span class="verse"> nodes whose immediately following
+    NavigableString siblings (up to the next <span class="verse">) are the text.
+    """
+    from bs4 import NavigableString, Tag
+
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    body = (
+        soup.find("div", id="textBody")
+        or soup.find("div", class_="textBody")
+        or soup.find("div", id="content")
+    )
+    if not body:
+        return []
+
+    verses: list[str] = []
+
+    for span in body.find_all("span", class_="verse"):
+        verse_num = span.get_text(strip=True).strip(".")
+        if not verse_num.isdigit():
+            continue
+
+        text_parts: list[str] = []
+        for sibling in span.next_siblings:
+            if isinstance(sibling, NavigableString):
+                t = str(sibling).strip()
+                if t:
+                    text_parts.append(t)
+            elif isinstance(sibling, Tag):
+                if sibling.name == "span" and "verse" in (sibling.get("class") or []):
+                    break
+                if sibling.name == "br":
+                    continue
+                t = sibling.get_text(strip=True)
+                if t:
+                    text_parts.append(t)
+
+        text = " ".join(text_parts).strip()
+        text = re.sub(r"^\d+\s*", "", text).strip()
+        if text:
+            verses.append(f"{verse_num} {text}")
+
+    return verses
+
+
+def _find_chapter_html(lang: str, book: str, chapter: int) -> Path | None:
+    """Locate the HTML file for a given lang+book+chapter inside the extracted zip."""
+    book_num   = _BOOK_TO_WP_NUM[book]
+    html_dir   = _wp_html_dir(lang)
+    wp_folder  = WP_LANG_FOLDER.get(lang, lang)  # internal folder name inside zip
+
+    # Primary: <wp_folder>/<book_num>/<chapter>.htm
+    primary = html_dir / wp_folder / book_num / f"{chapter}.htm"
+    if primary.exists():
+        return primary
+
+    # Alternative flat structure
+    alt = html_dir / book_num / f"{chapter}.htm"
+    if alt.exists():
+        return alt
+
+    # Recursive search as last resort
+    candidates = [
+        p for p in html_dir.rglob(f"{chapter}.htm")
+        if book_num in p.parts
+    ]
+    return candidates[0] if candidates else None
+
+
+def fetch_chapter_wp(lang: str, book: str, chapter: int) -> list[str]:
+    """Return parsed verses for a chapter from the locally extracted zip."""
+    html_path = _find_chapter_html(lang, book, chapter)
+    if not html_path:
+        tqdm.write(f"  [warn] {lang.upper()} HTML not found: {book} ch{chapter}")
+        return []
+    content = html_path.read_text(encoding="utf-8", errors="replace")
+    return _parse_wp_chapter_html(content)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Checkpoint & section I/O
@@ -262,9 +365,13 @@ def save_checkpoint(completed: set[str], stats: dict):
     _safe_replace(tmp, str(CHECKPOINT_PATH))
 
 
-def load_section(book: str) -> list[str]:
+def _section_path(book: str, lang: str) -> Path:
     safe_name = book.replace(" ", "_")
-    p = SECTIONS_DIR / f"{safe_name}.json"
+    return SECTIONS_DIR / f"{safe_name}_{lang}.json"
+
+
+def load_section(book: str, lang: str = "en") -> list[str]:
+    p = _section_path(book, lang)
     if p.exists():
         try:
             return json.loads(p.read_text(encoding="utf-8"))
@@ -273,9 +380,8 @@ def load_section(book: str) -> list[str]:
     return []
 
 
-def save_section(book: str, verses: list[str]):
-    safe_name = book.replace(" ", "_")
-    p   = SECTIONS_DIR / f"{safe_name}.json"
+def save_section(book: str, verses: list[str], lang: str = "en"):
+    p   = _section_path(book, lang)
     tmp = str(p) + ".tmp"
     Path(tmp).write_text(
         json.dumps(verses, indent=2, ensure_ascii=False),
@@ -285,23 +391,25 @@ def save_section(book: str, verses: list[str]):
 
 
 def merge_sections() -> list[dict]:
-    """Merge all section files into bible_raw.json with metadata."""
+    """Merge all section files (en + all WP languages) into bible_raw.json."""
+    all_langs = ["en"] + list(WP_LANGUAGES.keys())
     all_texts: list[dict] = []
-    for book in ALL_BOOKS:
-        safe_name = book.replace(" ", "_")
-        p = SECTIONS_DIR / f"{safe_name}.json"
-        if not p.exists():
-            continue
-        try:
-            verses = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        for verse in verses:
-            all_texts.append({
-                "text":      verse,
-                "section":   book,
-                "testament": TESTAMENT_MAP.get(book, "Unknown"),
-            })
+    for lang in all_langs:
+        for book in ALL_BOOKS:
+            p = _section_path(book, lang)
+            if not p.exists():
+                continue
+            try:
+                verses = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            for verse in verses:
+                all_texts.append({
+                    "text":      verse,
+                    "section":   book,
+                    "testament": TESTAMENT_MAP.get(book, "Unknown"),
+                    "language":  lang,
+                })
 
     tmp = str(DATA_PATH) + ".tmp"
     Path(tmp).write_text(
@@ -312,94 +420,137 @@ def merge_sections() -> list[dict]:
     return all_texts
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Download pipeline
+# Download pipelines
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _download_bible(completed: set[str], stats: dict):
+def _download_english(completed: set[str], stats: dict):
     print(f"\n{'═' * 60}")
     print("  Downloading Bible (KJV) via bible-api.com")
     print(f"{'═' * 60}")
 
-    for book, num_chapters in tqdm(ALL_BOOKS.items(), desc="Books", unit="book"):
-        testament = TESTAMENT_MAP[book]
-        book_verses = load_section(book)
-        prev  = stats.get(book, {"ok": 0, "warn": 0, "verses": 0})
-        ok    = prev.get("ok", 0)
-        warn  = prev.get("warn", 0)
+    for book, num_chapters in tqdm(ALL_BOOKS.items(), desc="Books (EN)", unit="book"):
+        testament   = TESTAMENT_MAP[book]
+        book_verses = load_section(book, "en")
+        prev        = stats.get(f"{book}:en", {"ok": 0, "warn": 0, "verses": 0})
+        ok, warn    = prev.get("ok", 0), prev.get("warn", 0)
 
-        chapters_done = set(
-            c for c in prev.get("chapters_done", [])
-        )
-        pending_chapters = [
-            ch for ch in range(1, num_chapters + 1)
-            if f"{book}:{ch}" not in completed
-        ]
+        pending = [ch for ch in range(1, num_chapters + 1)
+                   if f"{book}:{ch}:en" not in completed]
 
-        if not pending_chapters:
-            tqdm.write(f"  ✓ {book} ({testament}) — already complete")
+        if not pending:
+            tqdm.write(f"  ✓ {book} ({testament}) EN — already complete")
             continue
 
         tqdm.write(f"\n── {book}  [{testament}]  {num_chapters} chapters")
 
-        for chapter in pending_chapters:
-            key = f"{book}:{chapter}"
-            verses = fetch_chapter(book, chapter, num_chapters)
+        for chapter in pending:
+            key    = f"{book}:{chapter}:en"
+            verses = fetch_chapter_en(book, chapter, num_chapters)
             if verses:
                 book_verses.extend(verses)
                 ok += 1
             else:
-                tqdm.write(f"  [warn] empty: {book} {chapter}")
+                tqdm.write(f"  [warn] empty EN: {book} {chapter}")
                 warn += 1
 
             completed.add(key)
-            stats[book] = {
-                "ok": ok, "warn": warn,
-                "verses": len(book_verses),
-                "chapters_done": sorted(
-                    [c for c in stats.get(book, {}).get("chapters_done", [])]
-                    + [chapter]
-                ),
-            }
+            stats[f"{book}:en"] = {"ok": ok, "warn": warn, "verses": len(book_verses)}
             save_checkpoint(completed, stats)
 
-        save_section(book, book_verses)
-        tqdm.write(f"  → {len(book_verses)} verses saved")
+        save_section(book, book_verses, "en")
+        tqdm.write(f"  → {len(book_verses)} EN verses saved")
+
+
+def _download_wp_language(lang: str, completed: set[str], stats: dict):
+    """Generic Wordproject language downloader — works for si, ta, and any future language."""
+    lang_names = {"si": "Sinhala", "ta": "Tamil"}
+    label = lang_names.get(lang, lang.upper())
+
+    print(f"\n{'═' * 60}")
+    print(f"  Downloading Bible ({label}) from Wordproject zip")
+    print(f"{'═' * 60}")
+
+    _download_wp_zip(lang)
+    _extract_wp_zip(lang)
+
+    for book, num_chapters in tqdm(ALL_BOOKS.items(), desc=f"Books ({lang.upper()})", unit="book"):
+        key_book = f"{book}:{lang}"
+        if key_book in completed:
+            tqdm.write(f"  ✓ {book} {lang.upper()} — already complete")
+            continue
+
+        book_verses = load_section(book, lang)
+        new_verses  = []
+
+        for chapter in range(1, num_chapters + 1):
+            verses = fetch_chapter_wp(lang, book, chapter)
+            new_verses.extend(verses)
+
+        if new_verses:
+            book_verses.extend(new_verses)
+            save_section(book, book_verses, lang)
+            tqdm.write(f"  ✓ {book}: {len(new_verses)} {lang.upper()} verses")
+        else:
+            tqdm.write(f"  [warn] {book}: no {label} verses found")
+
+        completed.add(key_book)
+        stats[key_book] = {"verses": len(book_verses)}
+        save_checkpoint(completed, stats)
+
+
+def _reset_lang_checkpoint(lang: str, completed: set[str], stats: dict):
+    """Remove checkpoint entries and section files for a language so parser re-runs."""
+    suffix = f":{lang}"
+    for k in [k for k in list(completed) if k.endswith(suffix)]:
+        completed.discard(k)
+    for k in [k for k in list(stats.keys()) if k.endswith(suffix)]:
+        stats.pop(k, None)
+    for p in SECTIONS_DIR.glob(f"*_{lang}.json"):
+        p.unlink(missing_ok=True)
 
 
 def download_bible() -> list[dict]:
     completed, stats = load_checkpoint()
 
-    # ── Force re-fetch all single-chapter books every run until they have
-    #    the correct verse count. This is safe because the section file is
-    #    small and the fix ensures correct data on the next attempt.
-    SINGLE_CHAPTER_BOOKS = [b for b, n in ALL_BOOKS.items() if n == 1]
-    repaired = False
-    for book in SINGLE_CHAPTER_BOOKS:
-        expected = _SINGLE_CHAPTER_VERSE_COUNT.get(book, 0)
-        actual   = stats.get(book, {}).get("verses", 0)
-        key      = f"{book}:1"
-        if actual < expected:
-            tqdm.write(f"  [repair] {book}: has {actual} verses, expected {expected} — re-queuing")
-            completed.discard(key)
-            stats.pop(book, None)
-            safe_name = book.replace(" ", "_")
-            bad_file  = SECTIONS_DIR / f"{safe_name}.json"
-            if bad_file.exists():
-                bad_file.unlink()
-            repaired = True
-    if repaired:
-        save_checkpoint(completed, stats)
-        tqdm.write("  [repair] Checkpoint updated — affected books will be re-downloaded.\n")
+    # Auto-repair: if a WP language was "completed" but has 0 verses, reset it
+    for lang in WP_LANGUAGES:
+        lang_completed = sum(1 for k in completed if k.endswith(f":{lang}"))
+        lang_verses    = sum(
+            v.get("verses", 0) for k, v in stats.items()
+            if k.endswith(f":{lang}") and isinstance(v, dict)
+        )
+        if lang_completed > 0 and lang_verses == 0:
+            print(f"  [repair] {lang.upper()} verse count is 0 — resetting for re-extraction…")
+            _reset_lang_checkpoint(lang, completed, stats)
+            save_checkpoint(completed, stats)
 
-    _download_bible(completed, stats)
+    # Repair single-chapter English books if under-populated
+    for book in [b for b, n in ALL_BOOKS.items() if n == 1]:
+        expected = _SINGLE_CHAPTER_VERSE_COUNT.get(book, 0)
+        actual   = stats.get(f"{book}:en", {}).get("verses", 0)
+        if actual < expected:
+            tqdm.write(f"  [repair] {book} EN: {actual} verses, expected {expected} — re-queuing")
+            completed.discard(f"{book}:1:en")
+            stats.pop(f"{book}:en", None)
+            p = _section_path(book, "en")
+            if p.exists(): p.unlink()
+    save_checkpoint(completed, stats)
+
+    _download_english(completed, stats)
+
+    for lang in WP_LANGUAGES:
+        _download_wp_language(lang, completed, stats)
 
     print(f"\n  Merging all sections → {DATA_PATH} …")
     all_texts = merge_sections()
 
-    total_verses = sum(s.get("verses", 0) for s in stats.values())
     print(f"\n{'═' * 60}")
     print(f"  DOWNLOAD COMPLETE")
-    print(f"  {len(all_texts):,} entries  |  ~{total_verses:,} verses")
+    for lang in ["en"] + list(WP_LANGUAGES.keys()):
+        count = sum(1 for t in all_texts if t["language"] == lang)
+        label = {"en": "English", "si": "Sinhala", "ta": "Tamil"}.get(lang, lang.upper())
+        print(f"  {label}: {count:,} verses")
+    print(f"  Total:  {len(all_texts):,} entries")
     print(f"  Output: {DATA_PATH}")
     print(f"{'═' * 60}")
     return all_texts
