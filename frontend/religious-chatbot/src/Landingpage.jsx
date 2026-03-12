@@ -132,7 +132,7 @@ const DevBanner = ({ onClose }) => (
         Under Development
       </strong>
       <span style={{ color: "rgba(255,205,210,0.5)", fontSize: 11 }}>·</span>
-      This platform is still being built. Responses may be incomplete or inaccurate.
+      This platform is still being built.
     </span>
     <button
       onClick={onClose}
