@@ -109,8 +109,52 @@ export const ReligionSymbol = ({ symbolKey, size = 48, color = "currentColor", o
   return <Icon size={size} color={color} style={{ opacity, display: "block", flexShrink: 0 }} />;
 };
 
+// ─── Dev Banner ───────────────────────────────────────────────
+const DevBanner = ({ onClose }) => (
+  <div style={{
+    position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+    background: "linear-gradient(90deg, #7f0000 0%, #b71c1c 40%, #c62828 60%, #b71c1c 80%, #7f0000 100%)",
+    borderBottom: "1px solid rgba(255,100,100,0.25)",
+    padding: "9px 52px",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    boxShadow: "0 2px 16px rgba(183,28,28,0.55)",
+    fontFamily: "'Lora', Georgia, serif",
+  }}>
+    <span style={{
+      fontSize: 12.5, color: "#ffcdd2", letterSpacing: 0.4,
+      display: "flex", alignItems: "center", gap: 9,
+    }}>
+      <MdError size={15} color="#ff8a80" style={{ flexShrink: 0 }} />
+      <strong style={{
+        fontFamily: "'Cinzel', serif", letterSpacing: 1.5,
+        color: "#fff", fontSize: 11.5, textTransform: "uppercase",
+      }}>
+        Under Development
+      </strong>
+      <span style={{ color: "rgba(255,205,210,0.5)", fontSize: 11 }}>·</span>
+      This platform is still being built. Responses may be incomplete or inaccurate.
+    </span>
+    <button
+      onClick={onClose}
+      aria-label="Dismiss banner"
+      style={{
+        position: "absolute", right: 14,
+        background: "none", border: "none", cursor: "pointer",
+        color: "#ffcdd2", fontSize: 16, lineHeight: 1,
+        padding: "4px 8px", borderRadius: 6,
+        transition: "background 0.15s",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+    >
+      ✕
+    </button>
+  </div>
+);
+
 // ─── Religion Selection Page ──────────────────────────────────
-const ReligionSelectPage = ({ onSelect }) => {
+const ReligionSelectPage = ({ onSelect, bannerVisible }) => {
   const [hovered, setHovered] = useState(null);
 
   const features = [
@@ -125,8 +169,10 @@ const ReligionSelectPage = ({ onSelect }) => {
       background: "linear-gradient(160deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
       display: "flex", flexDirection: "column",
       alignItems: "center", justifyContent: "flex-start",
-      fontFamily: "'Lora', Georgia, serif", padding: "60px 24px 24px",
+      fontFamily: "'Lora', Georgia, serif",
+      padding: `${bannerVisible ? "98px" : "60px"} 24px 24px`,
       overflowX: "hidden",
+      transition: "padding-top 0.2s ease",
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Lora:ital,wght@0,400;0,500;1,400&display=swap');
@@ -510,14 +556,25 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
 export default function LandingPage({ onEnterChat }) {
   const [screen, setScreen]                     = useState("select");
   const [selectedReligion, setSelectedReligion] = useState(null);
+  const [showBanner, setShowBanner]             = useState(true);
 
   const handleSelect = (religion) => { setSelectedReligion(religion); setScreen("loading"); };
   const handleReady  = () => { onEnterChat(selectedReligion); };
   const handleError  = () => { setScreen("select"); setSelectedReligion(null); };
 
   if (screen === "loading") {
-    return <LoadingScreen religion={selectedReligion} onReady={handleReady} onError={handleError} />;
+    return (
+      <>
+        {showBanner && <DevBanner onClose={() => setShowBanner(false)} />}
+        <LoadingScreen religion={selectedReligion} onReady={handleReady} onError={handleError} />
+      </>
+    );
   }
 
-  return <ReligionSelectPage onSelect={handleSelect} />;
+  return (
+    <>
+      {showBanner && <DevBanner onClose={() => setShowBanner(false)} />}
+      <ReligionSelectPage onSelect={handleSelect} bannerVisible={showBanner} />
+    </>
+  );
 }
