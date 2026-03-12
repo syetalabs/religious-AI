@@ -3,7 +3,7 @@ import re
 import time
 import requests
 from dotenv import load_dotenv
-from retrieve import search
+from retrieve import search, MIN_CHUNKS_FOR_NATIVE
 
 # ────────────────────────────────────────────────────────────────
 # Groq API settings
@@ -15,8 +15,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
 # Models
-MODEL_DEFAULT  = "llama-3.1-8b-instant"   # English
-MODEL_SINHALA  = "qwen/qwen3-32b"         # Sinhala and Tamil (review + generation)
+MODEL_DEFAULT   = "llama-3.1-8b-instant"    # English answers
+MODEL_TRANSLATE = "llama-3.3-70b-versatile"  # Translation & nuance verification (faster than Qwen3)
+MODEL_SINHALA   = "qwen/qwen3-32b"           # Final SI/TA answer generation + terminology review
 
 if not GROQ_API_KEY:
     raise EnvironmentError(
@@ -530,12 +531,24 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
             "Output ONLY the English translation — no explanation, no extra text."
         ),
         "Christianity": (
-            "You are a translator. Translate the following question into "
+            "You are a translator. Translate the following Sinhala or Tamil question into "
             "concise English suitable for a Christian Bible scripture search. "
-            "Preserve the precise meaning of every Christian theological term — "
-            "for example: ගැලවීම/இரட்சிப்பு → salvation, ත්‍රිත්වය/திரித்துவம் → Trinity, "
-            "ඇදහිල්ල/விசுவாசம் → faith, පාපය/பாவம் → sin, දෙවිඳු/கடவுள் → God, "
-            "ශුද්ධ ලියවිල්ල/பைபிள் → Bible / scripture. "
+            "You MUST use the correct Christian theological English term — never a generic word.\n\n"
+            "CRITICAL term mappings (use these EXACTLY):\n"
+            "  ගැලවීම / இரட்சிப்பு        → salvation  (NOT escape, rescue, relief)\n"
+            "  ත්‍රිත්වය / திரித்துவம்     → Trinity\n"
+            "  ඇදහිල්ල / விசுவாசம்        → faith\n"
+            "  පාපය / பாவம்               → sin\n"
+            "  දෙවිඳු / கடவுள்            → God\n"
+            "  ශුද්ධ ලියවිල්ල / பைபிள்   → Bible / scripture\n"
+            "  මිදීම / மீட்பு             → redemption\n"
+            "  කරුණාව / கிருபை            → grace\n"
+            "  සදාකාලික ජීවිතය / நித்திய ஜீவன் → eternal life\n"
+            "  ශුද්ධ ආත්මය / பரிசுத்த ஆவி → Holy Spirit\n"
+            "  යාච්ඤාව / ஜெபம்            → prayer\n"
+            "  සමාව / மன்னிப்பு           → forgiveness\n"
+            "  පශ්චාත්තාපය / மனந்திரும்புதல் → repentance\n"
+            "  ජේසුස් / இயேசு             → Jesus\n\n"
             "Output ONLY the English translation — no explanation, no extra text."
         ),
     }
@@ -561,10 +574,10 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
     except Exception:
         step1 = question   # will be caught by the script-check below
 
-    # ── Step 1b: Retry with Qwen3 if llama returned untranslated text ──
+    # ── Step 1b: Retry with a stronger model if llama returned untranslated text ──
     # Happens when llama echoes the Sinhala/Tamil question unchanged or empty.
     if not step1 or _is_sinhala(step1) or _is_tamil(step1) or step1 == question:
-        print(f"  [translate] Step1 returned untranslated text — retrying with {MODEL_SINHALA!r}")
+        print(f"  [translate] Step1 returned untranslated text — retrying with {MODEL_TRANSLATE!r}")
         retry_system = (
             "You are a professional translator. "
             "The user will give you a question written in Sinhala or Tamil script. "
@@ -573,7 +586,7 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
             "No explanations, no original text, no quotes. Just the English translation."
         )
         payload_retry = {
-            "model":    MODEL_SINHALA,
+            "model":    MODEL_TRANSLATE,
             "messages": [
                 {"role": "system", "content": retry_system},
                 {"role": "user",   "content": question},
@@ -846,7 +859,7 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
         )
 
     payload_2 = {
-        "model":    MODEL_SINHALA,
+        "model":    MODEL_TRANSLATE,
         "messages": [
             {
                 "role":    "system",
@@ -958,6 +971,23 @@ def _call_groq(system_prompt: str, user_message: str, model: str, max_tokens: in
 # ════════════════════════════════════════════════════════════════
 # Retrieval post-processing
 # ════════════════════════════════════════════════════════════════
+
+def _unique_sources(results: list[dict]) -> tuple[list[str], list[float]]:
+    """
+    Return deduplicated (sources, scores) lists — one entry per unique book name,
+    keeping the highest score for that book.  Preserves order of first appearance.
+    """
+    seen   = {}   # book -> best score
+    order  = []   # insertion order
+    for r in results:
+        book  = r["book"]
+        score = r["score"]
+        if book not in seen:
+            seen[book] = score
+            order.append(book)
+        else:
+            seen[book] = max(seen[book], score)
+    return order, [seen[b] for b in order]
 
 def _refine_results(results: list[dict], religion: str) -> list[dict]:
     book_counts      = {}
@@ -1104,9 +1134,31 @@ def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
 _SENT_END   = re.compile(r'[.!?។]\s*$')
 _SENT_SPLIT = re.compile(r'[.!?។][\'"\)\]]*(?=\s|$)')
 
+def _detect_and_trim_repetition(text: str) -> str:
+    """
+    Detect and remove LLM generation loops — where a short phrase repeats
+    many times in a row (e.g. 'අනුග්‍රහය පිළිබඳව' × 50).
+    Keeps only the content up to the first repetition cycle.
+    """
+    # Split into sentences or clause-like chunks to find the repeat unit
+    # Check for any phrase of 3–60 chars that repeats 5+ consecutive times
+    pattern = re.compile(r'(.{3,60}?)(\1){4,}', re.DOTALL | re.UNICODE)
+    m = pattern.search(text)
+    if m:
+        # Trim everything from the start of the loop onward
+        cut = m.start()
+        trimmed = text[:cut].strip().rstrip(',;— ')
+        if len(trimmed) >= 30:
+            print(f"  [loop-detect] Repetition loop trimmed at char {cut} "
+                  f"(phrase: {m.group(1)[:40]!r})")
+            return trimmed
+    return text
+
+
 def _trim_incomplete_sentence(text: str) -> str:
     """
     Trim a response that ends mid-sentence due to token truncation.
+    Also detects and removes LLM generation loops before trimming.
     If the text already ends with proper punctuation, return it unchanged.
     Handles both English (.!?) and Sinhala (។) sentence endings.
     Also handles the common case where Sinhala text ends without punctuation
@@ -1116,6 +1168,9 @@ def _trim_incomplete_sentence(text: str) -> str:
     text = text.strip()
     if not text:
         return text
+
+    # Remove repetition loops first
+    text = _detect_and_trim_repetition(text)
 
     # Already ends cleanly
     if _SENT_END.search(text):
@@ -1155,6 +1210,12 @@ _CHRISTIAN_REPLACEMENTS = [
     ("යේසුස් ක්‍රිස්තුස්",        "ජේසුස් ක්‍රිස්තුස්"),
     ("යේසුස් වහන්සේ",             "ජේසුස් වහන්සේ"),
     ("යේසුස්",                     "ජේසුස්"),
+    # Common misspellings of බයිබලය
+    ("බිබලය",                      "බයිබලය"),
+    ("බිබලයේ",                     "බයිබලයේ"),
+    ("බිබලයට",                     "බයිබලයට"),
+    ("බිබලයෙන්",                   "බයිබලයෙන්"),
+    ("බිබල",                       "බයිබල"),
 ]
 
 def _apply_respectful_titles(text: str, religion: str = "Buddhism") -> str:
@@ -1232,16 +1293,22 @@ def _answer_is_no_context(text):
 # Phrases that indicate the LLM is hedging / explaining lack of context
 # rather than actually answering the question.
 _WEAK_CONTEXT_FRAGMENTS = [
-    "සන්දර්භයේ",           # "in the given context"
-    "ශාස්ත්‍රීය සන්දර්භ",  # "scriptural context"
-    "ප්‍රාණවත් විශ්වාසදායක", # exact no-context phrase
-    "ප්‍රමාණවත් විස්තර",   # "sufficient detail"
-    "ප්‍රමාණවත් නොවේ",     # "not sufficient"
-    "නොසඳහන් වේ",           # "is not mentioned"
-    "සඳහන් නොවේ",           # "not mentioned"
-    "වෙනත් ශාස්ත්‍රීය",    # "other scriptural texts"
-    "සොයා බැලිය යුතු",      # "should look up"
-    "යොමු කළ යුතු",         # "should refer to"
+    "සන්දර්භයේ",               # "in the given context"
+    "ශාස්ත්‍රීය සන්දර්භ",      # "scriptural context"
+    "ප්‍රාණවත් විශ්වාසදායක",   # exact no-context phrase
+    "ප්‍රමාණවත් විස්තර",       # "sufficient detail"
+    "ප්‍රමාණවත් නොවේ",         # "not sufficient"
+    "නොසඳහන් වේ",               # "is not mentioned"
+    "සඳහන් නොවේ",               # "not mentioned"
+    "වෙනත් ශාස්ත්‍රීය",        # "other scriptural texts"
+    "සොයා බැලිය යුතු",          # "should look up"
+    "යොමු කළ යුතු",             # "should refer to"
+    "සම්බන්ධ නොවන",             # "not connected to" — seen in Jesus answer
+    "මෙම පාඨ සඳහා සම්බන්ධ",    # "connected to these passages"
+    "ශාස්ත්‍රීය සැබෑව",         # "scriptural truth" (hedging phrase)
+    "ප්‍රකාශ කළ නොහැක",         # "cannot be expressed"
+    "වෙනත් පාඨ",                # "other passages" — suggesting look elsewhere
+    "සම්බන්ධ විය යුතු",         # "should be connected to"
 ]
 
 def _scrub_no_context_sentence(text):
@@ -1267,6 +1334,33 @@ def _answer_is_weak(text: str) -> bool:
                if any(f in s for f in _WEAK_CONTEXT_FRAGMENTS))
     # If more than half the sentences are hedging, consider it weak
     return weak / len(sentences) >= 0.5
+
+
+# Signals that the answer is about the wrong topic entirely —
+# detected when flood/Noah narrative dominates a salvation question, etc.
+_TOPIC_MISMATCH_SIGNALS = {
+    # question keyword (EN) → words that should NOT dominate the answer
+    "salvation": ["noah", "flood", "නෝහා", "ජලගැල්ම", "ark", "නෞකා",
+                  "வெள்ளம்", "நோவா"],
+    "trinity":   ["flood", "ජලගැල්ම", "noah", "නෝහා"],
+    "prayer":    ["flood", "ජලගැල්ම", "noah", "නෝහා"],
+}
+
+def _is_topic_mismatch(en_query: str, answer: str) -> bool:
+    """
+    Return True if the answer appears to be about a completely different topic
+    than what was asked — e.g. flood narrative returned for a salvation question.
+    """
+    q = en_query.lower()
+    a = answer.lower()
+    for keyword, bad_signals in _TOPIC_MISMATCH_SIGNALS.items():
+        if keyword in q:
+            hits = sum(1 for s in bad_signals if s in a)
+            if hits >= 2:
+                print(f"  [topic-mismatch] query contains '{keyword}' but answer "
+                      f"contains {hits} mismatch signals — treating as bad retrieval")
+                return True
+    return False
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1386,6 +1480,7 @@ def _review_translation(
                 "  නිරය             → hell\n"
                 "  පශ්චාත්තාපය      → repentance — 'regret' පමණ නොවේ\n"
                 "  ශුද්ධ ලියවිල්ල  → Bible / scripture\n"
+                "  බයිබලය           → Bible — 'බිබලය' හෝ 'බිබල' නොවේ (spelling නිවැරදිය: බ-යි-බ-ල-ය)\n"
                 "  තෑග්ග / ප්‍රදානය → gift (දෙවියන් වහන්සේගෙන් ලැබෙන) — 'ආගෝපාදා' හෝ ව්‍යාජ වචන නොවේ\n"
                 "  දිව් බස / භාෂාවන් → tongues (spiritual gift) — 'languages' පමණ නොවේ\n"
                 "  අභිරහස           → mystery — 'secret' හෝ 'puzzle' නොවේ\n"
@@ -1425,12 +1520,12 @@ def _review_translation(
         f"{translated_text}"
     )
 
-    reviewed = _call_groq(system_prompt, user_message, MODEL_SINHALA)
+    reviewed = _call_groq(system_prompt, user_message, MODEL_TRANSLATE)
     reviewed = re.sub(r"<think>.*?</think>", "", reviewed, flags=re.DOTALL)
     reviewed = re.sub(r"<think>.*$",         "", reviewed, flags=re.DOTALL).strip()
 
     if not reviewed or len(reviewed) < 20:
-        print(f"  [review] Qwen3 review returned empty — keeping original translation")
+        print(f"  [review] Translation review returned empty — keeping original translation")
         return translated_text
 
     print(f"  [review] Qwen3 review applied ({target_lang})")
@@ -1474,7 +1569,7 @@ def _english_context_then_translate(
 
     # Only bail out if the LLM itself says it has no context (hallucination guard).
     # A translated answer for si/ta is still valid even if it went through English retrieval.
-    if not en_ans or _answer_is_no_context(en_ans) or _answer_is_weak(en_ans):
+    if not en_ans or _answer_is_no_context(en_ans) or _answer_is_weak(en_ans) or _is_topic_mismatch(en_query, en_ans):
         return {
             "answer": _FALLBACK_MESSAGES.get(target_lang, _FALLBACK_MESSAGES["en"])["no_context"],
             "sources": [], "scores": [], "flagged": False,
@@ -1501,13 +1596,98 @@ def _english_context_then_translate(
     warning_key = f"used_en_context_with_translation_{target_lang}"
     matched = [r for r in en_res if r["book"].lower() in translated.lower()]
     disp    = matched if matched else en_res
+    src, scores_out = _unique_sources(disp)
     return {
         "answer":         translated,
-        "sources":        [r["book"]  for r in disp],
-        "scores":         [r["score"] for r in disp],
+        "sources":        src,
+        "scores":         scores_out,
         "flagged":        False,
         "low_confidence": False,
         "warnings":       [warning_key] + extra_warnings,
+    }
+
+
+# ════════════════════════════════════════════════════════════════
+# Christianity native SI/TA path — Qwen3 answers directly from
+# native-language chunks in chunks-en-si-ta.db
+# ════════════════════════════════════════════════════════════════
+
+def _answer_with_native_christianity_chunks(
+    question:    str,
+    en_query:    str,
+    native_res:  list[dict],
+    religion:    str,
+    target_lang: str,          # "si" or "ta"
+) -> dict:
+    """
+    Build a prompt from native SI/TA Christianity scripture chunks and call
+    Qwen3 directly (no translation step needed — the context is already in
+    the user's language).
+
+    Returns the same dict shape as answer_question().
+    Raises nothing — on any Qwen3 failure the caller falls back to the
+    English-context + translate path.
+    """
+    native_res = _refine_results(native_res, religion)
+
+    context = "\n\n---\n\n".join(
+        f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
+        for r in native_res
+    )
+
+    persona      = _PERSONAS_SI[religion] if target_lang == "si" else _PERSONAS_EN.get(religion, "")
+    format_instr = _format_instructions(religion, _is_list_request(question), target_lang)
+    ref_note_map = {
+        "si": "John 3:16, Romans 8:28 වැනි නිශ්චිත වාක්‍ය අංක උද්ධෘත නොකරන්න",
+        "ta": "John 3:16, Romans 8:28 போன்ற குறிப்பிட்ட வசன எண்களை மேற்கோள் காட்டாதீர்கள்",
+    }
+    ref_note = ref_note_map.get(target_lang, "Do NOT cite specific verse numbers")
+
+    if target_lang == "si":
+        user_message = (
+            f"ශාස්ත්‍රීය සන්දර්භය:\n{context}\n\n"
+            f"ප්‍රශ්නය: {question}\n\n"
+            f"උපදෙස්:\n{format_instr}\n"
+            f"- ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම් {ref_note}.\n\n"
+            f"පිළිතුර:"
+        )
+    else:  # ta
+        user_message = (
+            f"மறைநூல் சூழல்:\n{context}\n\n"
+            f"கேள்வி: {question}\n\n"
+            f"வழிமுறைகள்:\n{format_instr}\n"
+            f"- {ref_note}.\n\n"
+            f"பதில்:"
+        )
+
+    raw = _call_groq(persona, user_message, MODEL_SINHALA)
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+    raw = _trim_incomplete_sentence(raw)
+    raw = _scrub_no_context_sentence(raw)
+    raw = _scrub_question_echo(raw)
+
+    if not raw or _answer_is_no_context(raw) or _answer_is_weak(raw) or _is_topic_mismatch(en_query, raw):
+        # Signal to caller that this path failed
+        return {}
+
+    raw = _apply_respectful_titles(raw, religion)
+    raw = _scrub_fabricated_book_cites(raw, context)
+    final_answer, warnings = moderate_output(raw, context, religion, target_lang)
+    final_answer = _scrub_question_echo(final_answer)
+    final_answer = _apply_respectful_titles(final_answer, religion)
+
+    matched         = [r for r in native_res if r["book"].lower() in final_answer.lower()]
+    display_results = matched if matched else native_res
+    src, scores_out = _unique_sources(display_results)
+
+    return {
+        "answer":         final_answer,
+        "sources":        src,
+        "scores":         scores_out,
+        "flagged":        False,
+        "low_confidence": False,
+        "warnings":       [f"used_native_{target_lang}_chunks"] + warnings,
     }
 
 
@@ -1571,12 +1751,41 @@ def answer_question(
         }
 
     # ════════════════════════════════════════════════════════════
-    # TAMIL PATH — no Tamil scripture in DB, always use English
-    # context + translate to Tamil
+    # TAMIL PATH
     # ════════════════════════════════════════════════════════════
     if lang == "ta":
         en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [ta] EN query: {en_query!r}")
+
+        # For Christianity: first try native Tamil chunks from chunks-en-si-ta.db
+        if religion == "Christianity":
+            from retrieve import search_christianity_native_lang
+            print("  [ta] Christianity — checking chunks-en-si-ta.db for Tamil chunks")
+            try:
+                native_res = search_christianity_native_lang(en_query, language="ta")
+            except Exception as exc:
+                print(f"  [ta] Native search error: {exc} — falling back to translate path")
+                native_res = []
+
+            if len(native_res) >= MIN_CHUNKS_FOR_NATIVE:
+                print(f"  [ta] {len(native_res)} Tamil chunks found — calling Qwen3 directly")
+                try:
+                    result = _answer_with_native_christianity_chunks(
+                        question, en_query, native_res, religion, target_lang="ta"
+                    )
+                except Exception as exc:
+                    print(f"  [ta] Qwen3 native path error: {exc} — falling back to translate path")
+                    result = {}
+
+                if result:
+                    return result
+                print("  [ta] Qwen3 returned weak/empty answer — falling back to translate path")
+            else:
+                print(
+                    f"  [ta] Only {len(native_res)} Tamil chunk(s) found "
+                    f"(need {MIN_CHUNKS_FOR_NATIVE}) — using English context + translate"
+                )
+
         return _english_context_then_translate(question, en_query, religion, target_lang="ta")
 
     # ════════════════════════════════════════════════════════════
@@ -1588,16 +1797,43 @@ def answer_question(
         print(f"  [si] Original question: {question[:80]!r}")
         print(f"  [si] Translated EN query: {en_query!r}")
 
-        # Christianity has no Sinhala scripture data — go straight to
-        # the English-context + translate path.
+        # Christianity: first try native Sinhala chunks from chunks-en-si-ta.db,
+        # then fall back to the English-context + translate path.
         if religion == "Christianity":
-            print("  [si] Christianity — no Sinhala scripture DB, using English context + translation")
+            from retrieve import search_christianity_native_lang
+            print("  [si] Christianity — checking chunks-en-si-ta.db for Sinhala chunks")
+            try:
+                native_res = search_christianity_native_lang(en_query, language="si")
+            except Exception as exc:
+                print(f"  [si] Native search error: {exc} — falling back to translate path")
+                native_res = []
+
+            if len(native_res) >= MIN_CHUNKS_FOR_NATIVE:
+                print(f"  [si] {len(native_res)} Sinhala chunks found — calling Qwen3 directly")
+                try:
+                    result = _answer_with_native_christianity_chunks(
+                        question, en_query, native_res, religion, target_lang="si"
+                    )
+                except Exception as exc:
+                    print(f"  [si] Qwen3 native path error: {exc} — falling back to translate path")
+                    result = {}
+
+                if result:
+                    return result
+                print("  [si] Qwen3 returned weak/empty answer — falling back to translate path")
+            else:
+                print(
+                    f"  [si] Only {len(native_res)} Sinhala chunk(s) found "
+                    f"(need {MIN_CHUNKS_FOR_NATIVE}) — using English context + translate"
+                )
+
+            print("  [si] Christianity — using English context + translation fallback")
             return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
         from retrieve import search_sinhala_direct
         from translator import translate_from_english
 
-        # Step 2: Check for relevant Sinhala chunks in DB
+        # Step 2: Check for relevant Sinhala chunks in DB (Buddhism)
         si_results = search_sinhala_direct(en_query, religion=religion)
         print(f"  [si] Sinhala chunks found: {len(si_results)}"
               + (f" — top score: {si_results[0]['score']:.3f}" if si_results else " — falling back to English context"))
@@ -1650,11 +1886,12 @@ def answer_question(
                 answer_lower    = final_answer.lower()
                 matched         = [r for r in si_results if r["book"].lower() in answer_lower]
                 display_results = matched if matched else si_results
+                src, scores_out = _unique_sources(display_results)
 
                 return {
                     "answer":         final_answer,
-                    "sources":        [r["book"]  for r in display_results],
-                    "scores":         [r["score"] for r in display_results],
+                    "sources":        src,
+                    "scores":         scores_out,
                     "flagged":        False,
                     "low_confidence": False,
                     "warnings":       warnings,
@@ -1712,11 +1949,12 @@ def answer_question(
     answer_lower    = final_answer.lower()
     matched         = [r for r in results if r["book"].lower() in answer_lower]
     display_results = matched if matched else results
+    src, scores_out = _unique_sources(display_results)
 
     return {
         "answer":         final_answer,
-        "sources":        [r["book"]  for r in display_results],
-        "scores":         [r["score"] for r in display_results],
+        "sources":        src,
+        "scores":         scores_out,
         "flagged":        False,
         "low_confidence": False,
         "warnings":       warnings,
