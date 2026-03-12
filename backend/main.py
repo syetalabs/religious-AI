@@ -86,8 +86,8 @@ def health():
             "db":    Path("/tmp/religious-ai-data/buddhism/chunks-en-si.db"),
         },
         "christianity": {
-            "faiss": Path("/tmp/religious-ai-data/christianity/faiss_index.bin"),
-            "db":    Path("/tmp/religious-ai-data/christianity/chunks.db"),
+            "faiss": Path("/tmp/religious-ai-data/christianity/faiss_index-en-si-ta.bin"),
+            "db":    Path("/tmp/religious-ai-data/christianity/chunks-en-si-ta.db"),
         },
     }.items():
         files_info[religion] = {
@@ -100,6 +100,7 @@ def health():
                 "size_mb": round(paths["db"].stat().st_size / 1_048_576, 1) if paths["db"].exists() else 0,
             },
         }
+
 
     return {
         "status":        "ready" if _ready else ("error" if _load_error else "loading"),

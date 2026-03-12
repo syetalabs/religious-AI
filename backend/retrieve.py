@@ -13,14 +13,14 @@ DATA_ROOT = Path("/tmp/religious-ai-data")
 
 _RELIGION_PATHS = {
     "Buddhism": {
-        "dir":        DATA_ROOT / "buddhism",
-        "faiss":      DATA_ROOT / "buddhism" / "faiss_index-en-si.bin",
-        "db":         DATA_ROOT / "buddhism" / "chunks-en-si.db",
+        "dir":   DATA_ROOT / "buddhism",
+        "faiss": DATA_ROOT / "buddhism" / "faiss_index-en-si.bin",
+        "db":    DATA_ROOT / "buddhism" / "chunks-en-si.db",
     },
     "Christianity": {
-        "dir":        DATA_ROOT / "christianity",
-        "faiss":      DATA_ROOT / "christianity" / "faiss_index.bin",
-        "db":         DATA_ROOT / "christianity" / "chunks.db",
+        "dir":   DATA_ROOT / "christianity",
+        "faiss": DATA_ROOT / "christianity" / "faiss_index-en-si-ta.bin",
+        "db":    DATA_ROOT / "christianity" / "chunks-en-si-ta.db",
     },
 }
 
@@ -380,4 +380,101 @@ def search_sinhala_direct(
 
     print(f"  [si-search] Sinhala chunks returned: {len(results)} "
           f"(candidates scanned: {len(candidate_ids)}, fetch_k={fetch_k})")
+    return results
+
+
+# ────────────────────────────────────────────────────────────────
+# Christianity SI/TA native-language search
+# ────────────────────────────────────────────────────────────────
+MIN_CHUNKS_FOR_NATIVE = 2   # Minimum chunks required to use native-language path
+
+def search_christianity_native_lang(
+    en_query:  str,
+    language:  str,          # "si" or "ta"
+    top_k:     int   = TOP_K,
+    threshold: float = 0.20,
+) -> list[dict]:
+    """
+    Search chunks-en-si-ta.db for Sinhala or Tamil Christianity scripture chunks.
+
+    Uses the unified Christianity FAISS index (faiss_index-en-si-ta.bin) for
+    semantic search with the English query, then filters the unified DB
+    (chunks-en-si-ta.db) for rows whose language matches the requested language.
+
+    Falls back to an empty list if the index is not loaded yet or no chunks
+    pass the threshold.  Returns list[dict] in the same shape as search().
+    """
+    _lazy_load("Christianity")
+
+    idx = _indexes.get("Christianity")
+    con = _cons.get("Christianity")
+    if idx is None or con is None:
+        return []
+
+    query_vec = _encode(en_query)
+    faiss.normalize_L2(query_vec)
+
+    # Scan wide — English chunks will score higher for an English query;
+    # we need to go deep to surface SI/TA chunks.
+    fetch_k = min(top_k * 60, idx.ntotal)
+    scores, indices = idx.search(query_vec, fetch_k)
+    scores  = scores[0]
+    indices = indices[0]
+
+    allowed_ids = set(_religion_ids["Christianity"].get("Christianity", []))
+
+    candidate_ids = [
+        int(ix) for score, ix in zip(scores, indices)
+        if ix != -1 and int(ix) in allowed_ids and float(score) >= threshold
+    ]
+    if not candidate_ids:
+        print(f"  [native-search] No candidates above threshold={threshold:.2f}")
+        return []
+
+    # Fetch rows directly from the unified DB, filtering by language
+    lang_aliases  = _LANG_ALIASES.get(language, [language])
+    placeholders  = ",".join("?" * len(candidate_ids))
+    lang_ph       = ",".join("?" * len(lang_aliases))
+    score_map     = {int(ix): float(s) for s, ix in zip(scores, indices) if ix != -1}
+
+    try:
+        rows = con.execute(
+            f"""
+            SELECT id, text, book, source,
+                   COALESCE(testament, '') AS pitaka,
+                   religion, language
+            FROM   chunks
+            WHERE  id IN ({placeholders})
+              AND  LOWER(language) IN ({lang_ph})
+            """,
+            candidate_ids + [a.lower() for a in lang_aliases],
+        ).fetchall()
+    except Exception as exc:
+        print(f"  [native-search] DB query error: {exc}")
+        return []
+
+    results  = []
+    seen     = set()
+    for row in rows:
+        text_hash = hash(row["text"][:200])
+        if text_hash in seen:
+            continue
+        seen.add(text_hash)
+        results.append({
+            "text":     row["text"],
+            "book":     row["book"],
+            "pitaka":   row["pitaka"],
+            "source":   row["source"],
+            "religion": row["religion"],
+            "language": row["language"],
+            "score":    score_map.get(row["id"], 0.0),
+        })
+        if len(results) >= top_k:
+            break
+
+    results.sort(key=lambda r: -r["score"])
+    print(
+        f"  [native-search] language={language!r} chunks returned: {len(results)} "
+        f"(candidates scanned: {len(candidate_ids)}, fetch_k={fetch_k})"
+    )
     return results

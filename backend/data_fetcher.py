@@ -12,18 +12,19 @@ DATA_ROOT    = Path("/tmp/religious-ai-data")
 
 _FILES = {
     "buddhism": [
-        ("buddhism/faiss_index-en-si.bin", "faiss_index-en-si.bin"),
-        ("buddhism/chunks-en-si.db",       "chunks-en-si.db"),
+        ("buddhism/faiss_index-en-si.bin",      "faiss_index-en-si.bin", False),
+        ("buddhism/chunks-en-si.db",            "chunks-en-si.db",       False),
     ],
     "christianity": [
-        ("christianity/faiss_index.bin", "faiss_index.bin"),
-        ("christianity/chunks.db",       "chunks.db"),
+        ("christianity/faiss_index-en-si-ta.bin", "faiss_index-en-si-ta.bin", False),
+        ("christianity/chunks-en-si-ta.db",       "chunks-en-si-ta.db",       False),
     ],
 }
 
 # Old filenames that must be removed so retrieve.py never opens them
 _STALE_FILES = {
-    "buddhism": ["faiss_index.bin", "chunks.db"],
+    "buddhism":     ["faiss_index.bin", "chunks.db"],
+    "christianity": ["faiss_index.bin", "chunks.db"],   # replaced by en-si-ta files
 }
 
 
@@ -36,19 +37,25 @@ def _purge_stale(religion: str) -> None:
             print(f"  [data_fetcher] Removed stale file: {stale}")
 
 
-def _download_file(repo_path: str, dest: Path) -> None:
+def _download_file(repo_path: str, dest: Path, optional: bool = False) -> None:
     if dest.exists() and dest.stat().st_size > 1024:
         print(f"  [data_fetcher] Already exists: {dest.name} ({dest.stat().st_size // 1024:,} KB)")
         return
     print(f"  [data_fetcher] Downloading {repo_path} ...")
     dest.parent.mkdir(parents=True, exist_ok=True)
     from huggingface_hub import hf_hub_download
-    tmp = hf_hub_download(
-        repo_id=HF_REPO_ID,
-        repo_type=HF_REPO_TYPE,
-        filename=repo_path,
-        cache_dir=str(DATA_ROOT / ".hf_cache"),
-    )
+    try:
+        tmp = hf_hub_download(
+            repo_id=HF_REPO_ID,
+            repo_type=HF_REPO_TYPE,
+            filename=repo_path,
+            cache_dir=str(DATA_ROOT / ".hf_cache"),
+        )
+    except Exception as exc:
+        if optional:
+            print(f"  [data_fetcher] Optional file not available, skipping: {repo_path} ({exc})")
+            return
+        raise
     shutil.copy2(tmp, dest)
     print(f"  [data_fetcher] Saved {dest.name} ({dest.stat().st_size // 1024:,} KB)")
 
@@ -60,8 +67,8 @@ def ensure_data_files(religions=None) -> None:
         _purge_stale(religion)
         dest_dir = DATA_ROOT / religion
         dest_dir.mkdir(parents=True, exist_ok=True)
-        for repo_path, local_name in _FILES[religion]:
-            _download_file(repo_path, dest_dir / local_name)
+        for repo_path, local_name, optional in _FILES[religion]:
+            _download_file(repo_path, dest_dir / local_name, optional=optional)
     print("  [data_fetcher] All data files ready.")
 
 
