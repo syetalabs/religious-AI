@@ -119,7 +119,7 @@ _PERSONAS_SI = {
   "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ."
 - සරල, පැහැදිලි, දෛනික භාෂාව භාවිත කරන්න. පාලි තාක්ෂණික පද භාවිත කරන්නේ නම් ඒවා පැහැදිලි කරන්න.
 - ගැඹුරට යාමට පෙර ඉගැන්වීමේ වඩාත්ම මානවීය, සාපේක්ෂ අංශයෙන් ආරම්භ කරන්න.
-- ප්‍රශ්නයට වැඩිපුර අවශ්‍ය නැතිනම් පිළිතුරු සංක්ෂිප්ත රාඛන්න — වාක්‍ය 3 සිට 5 දක්වා.
+- පිළිතුරු දිගේ: සරල ප්‍රශ්නවලට වාක්‍ය 3–5 ක් දෙන්න. නමුත් චතුරාර්ය සත්‍යය, ත්‍රිලක්ෂණය, පටිච්චසමුප්පාදය, නිර්වාණය, කර්මය, අෂ්ටාංගික මාර්ගය වැනි ගැඹුරු ධාර්මික ප්‍රශ්නවලට — සන්දර්භය ඉඩ දෙන තාක් — සම්පූර්ණ, ගැඹුරු, හොඳින් ව්‍යුහගත් පිළිතුරු දෙන්න. අදාළ කරුණු කිහිපයක් තිබේ නම් ඒවා කෙටි ඡේදවලින් ඉදිරිපත් කරන්න.
 - පෞද්ගලික මත හෝ සදාචාරාත්මක විනිශ්චය ඉදිරිපත් නොකරන්න.
 - බුදු දහම වෙනත් ආගම් සමඟ සසසඳන්න එපා.
 - වෙනත් සම්ප්‍රදායන්ගේ ඉගැන්වීම් මිශ්‍ර නොකරන්න.
@@ -139,7 +139,7 @@ _PERSONAS_SI = {
   "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ."
 - අලුත් අය සාදරයෙන් පිළිගන්නා සරල, පැහැදිලි, දෛනික භාෂාව භාවිත කරන්න.
 - ගැඹුරට යාමට පෙර ඉගැන්වීමේ වඩාත්ම මානවීය, සාපේක්ෂ අංශයෙන් ආරම්භ කරන්න.
-- ප්‍රශ්නයට වැඩිපුර අවශ්‍ය නැතිනම් පිළිතුරු සංක්ෂිප්ත රාඛන්න — වාක්‍ය 3 සිට 5 දක්වා.
+- පිළිතුරු දිගේ: සරල ප්‍රශ්නවලට වාක්‍ය 3–5 ක් දෙන්න. නමුත් ත්‍රිත්වය, ගැලවීම, දෙවිත්වය, ප්‍රායශ්චිත්තය, නිදහස් කැමැත්ත, ප්‍රවාදය වැනි ගැඹුරු දේශන ශාස්ත්‍රීය ප්‍රශ්නවලට — සන්දර්භය ඉඩ දෙන තාක් — සම්පූර්ණ, ගැඹුරු, හොඳින් ව්‍යුහගත් පිළිතුරු දෙන්න. අදාළ කරුණු කිහිපයක් තිබේ නම් ඒවා කෙටි ඡේදවලින් ඉදිරිපත් කරන්න.
 - පෞද්ගලික මත හෝ සදාචාරාත්මක විනිශ්චය ඉදිරිපත් නොකරන්න.
 - ක්‍රිස්තියානි ධර්මය වෙනත් ආගම් සමඟ සසඳන්න එපා.
 - වෙනත් සම්ප්‍රදායන්ගේ ඉගැන්වීම් මිශ්‍ර නොකරන්න.
@@ -1206,16 +1206,98 @@ _BUDDHA_REPLACEMENTS = [
 # Google Translate and most LLMs render Jesus as යේසුස් (incorrect Sinhala convention)
 # The correct Sinhala Catholic/Protestant spelling is ජේසුස් වහන්සේ.
 _CHRISTIAN_REPLACEMENTS = [
-    ("යේසුස් ක්‍රිස්තුස් වහන්සේ", "ජේසුස් ක්‍රිස්තුස් වහන්සේ"),
-    ("යේසුස් ක්‍රිස්තුස්",        "ජේසුස් ක්‍රිස්තුස්"),
-    ("යේසුස් වහන්සේ",             "ජේසුස් වහන්සේ"),
-    ("යේසුස්",                     "ජේසුස්"),
-    # Common misspellings of බයිබලය
-    ("බිබලය",                      "බයිබලය"),
-    ("බිබලයේ",                     "බයිබලයේ"),
-    ("බිබලයට",                     "බයිබලයට"),
-    ("බිබලයෙන්",                   "බයිබලයෙන්"),
-    ("බිබල",                       "බයිබල"),
+    # ── Jesus / Christ ───────────────────────────────────────────
+    ("යේසුස් ක්‍රිස්තුස් වහන්සේ",  "ජේසුස් ක්‍රිස්තුස් වහන්සේ"),
+    ("යේසුස් ක්‍රිස්තුස්",         "ජේසුස් ක්‍රිස්තුස්"),
+    ("යේසුස් වහන්සේ",              "ජේසුස් වහන්සේ"),
+    ("යේසුස්",                      "ජේසුස්"),
+    ("ක්‍රිස්තුවන්",                "ක්‍රිස්තුස්"),   # "Christians" wrongly used for Christ
+    # ── Bible ────────────────────────────────────────────────────
+    ("බිබලයේ",                      "බයිබලයේ"),
+    ("බිබලයට",                      "බයිබලයට"),
+    ("බිබලයෙන්",                    "බයිබලයෙන්"),
+    ("බිබලය",                       "බයිබලය"),
+    ("බිබල",                        "බයිබල"),
+    # ── Holy Spirit ──────────────────────────────────────────────
+    ("පරිචාරක පවුල්",               "පරිශුද්ධ ආත්මය"),
+    ("සිත් වායුව",                  "පරිශුද්ධ ආත්මය"),
+    ("ශුද්ධ ආත්මාව",                "පරිශුද්ධ ආත්මය"),
+    ("ශුද්ධ ආත්මය",                 "පරිශුද්ධ ආත්මය"),
+    ("ශුද්ධ ගෝස්ට්",                "පරිශුද්ධ ආත්මය"),
+    ("ශුද්ධාත්මය",                  "පරිශුද්ධ ආත්මය"),
+    ("පරිශුද්ධාත්මය",               "පරිශුද්ධ ආත්මය"),
+    # ── God the Father ───────────────────────────────────────────
+    ("පියා දෙවියන්",                "පිතාවන් වහන්සේ"),
+    ("පිය දෙවිඳු",                  "පිතාවන් වහන්සේ"),
+    ("පියා (දෙවියන්)",              "පිතාවන් වහන්සේ"),
+    # ── Son of God ───────────────────────────────────────────────
+    ("දෙවියන්ගේ පුතා",              "දෙවියන්ගේ පුත්‍රයා"),
+    ("දෙවිඳුගේ පුතා",               "දෙවිඳුගේ පුත්‍රයා"),
+    # ── Core theology ────────────────────────────────────────────
+    ("ගැළවීම",                      "ගැලවීම"),         # alternate spelling
+    ("ත්‍රිකෝණය",                   "ත්‍රිත්වය"),      # wrong: triangle
+    ("ත්‍රිමූර්තිය",                "ත්‍රිත්වය"),      # wrong: Hindu term
+    ("ත්‍රිදේවය",                   "ත්‍රිත්වය"),      # wrong
+    ("ශුද්ධ හදවත",                  "ශුද්ධ ගිවිසුම"),  # Sacred Heart ≠ covenant
+    ("ශුද්ධ ආශිර්වාදය",             "දිව්‍ය ආශිර්වාදය"),
+    ("ගොඩ නැගීම",                   "ගැලවීම"),         # wrong: "building up" used for salvation
+    ("නිදහස",                       "ගැලවීම"),         # ONLY when used as theological salvation
+    # ── Salvation / redemption ───────────────────────────────────
+    ("ගැලවිලිය",                    "ගැලවීම"),
+    ("ගලවා ගැනීම",                  "ගැලවීම"),
+    ("කප්පාදු කිරීම",               "ප්‍රायශ්චිත්තය"), # "cutting" wrongly used for atonement
+    ("ප්‍රතිඋත්පාදනය",              "නැවත උපතක්"),     # wrong for rebirth in Christian context
+    # ── Prayer / worship ─────────────────────────────────────────
+    ("ඉල්ලීම",                      "යාච්ඤාව"),        # "request" used instead of prayer
+    ("ඉල්ල සිටීම",                  "යාච්ඤා කිරීම"),
+    ("නමස්කාර කිරීම",               "නමස්කාරය"),
+    ("වන්දනා කිරීම",                "ආරාධනය"),
+    # ── Sacraments ───────────────────────────────────────────────
+    ("ස්නාන කිරීම",                 "බාප්තිස්මය"),     # "bathing" wrongly used
+    ("දිය බෑම",                     "බාප්තිස්මය"),     # "washing in water"
+    ("ශුද්ධ භෝජනය",                 "දිව්‍ය සත්ප්‍රසාදය"),
+    ("ශුද්ධ රාත්‍රී භෝජනය",         "දිව්‍ය සත්ප්‍රසාදය"),
+    ("ශුද්ධ කොමියුනියන්",           "දිව්‍ය සත්ප්‍රසාදය"),
+    ("Holy Communion",              "දිව්‍ය සත්ප්‍රසාදය"),
+    ("Eucharist",                   "දිව්‍ය සත්ප්‍රසාදය"),
+    # ── Scripture / church ───────────────────────────────────────
+    ("ශුද්ධ ග්‍රන්ථය",              "ශුද්ධ ලියවිල්ල"),
+    ("ධර්ම ග්‍රන්ථය",              "ශුද්ධ ලියවිල්ල"),  # Buddhist term leaking in
+    ("ත්‍රිපිටකය",                  "ශුද්ධ ලියවිල්ල"),  # Buddhist term leaking in
+    ("ශාස්ත්‍ර ශ්‍රේෂ්ඨය",          "ශුද්ධ ලියවිල්ල"),
+    ("දේවාලය",                      "පල්ලිය"),          # Hindu temple term used for Church
+    ("ශුද්ධ ශ්‍රාවකාගාරය",          "පල්ලිය"),
+    ("සභාව",                        "පල්ලිය"),          # "assembly" used instead of church
+    ("ශාස්ත්‍ර ශ්‍රේෂ්ඨය",          "ශුද්ධ ලියවිල්ල"),
+    # ── Heaven / afterlife ───────────────────────────────────────
+    ("දෙව්ලොව",                     "ස්වර්ගය"),
+    ("ආකාශය",                       "ස්වර්ගය"),        # "sky" used for heaven
+    ("ආකාශ රාජ්‍යය",               "දෙව් රාජ්‍යය"),
+    ("ස්වර්ග රාජ්‍යය",             "දෙව් රාජ්‍යය"),
+    ("පාතාලය",                      "නිරය"),            # "underworld" used for hell
+    # ── Faith / sin / repentance ─────────────────────────────────
+    ("විශ්වාසය",                    "ඇදහිල්ල"),        # generic "trust" used instead of faith
+    ("දෝෂය",                        "පාපය"),            # "fault/error" used for sin
+    ("වරද",                         "පාපය"),            # "mistake" used for sin
+    ("කනගාටුව",                     "පශ්චාත්තාපය"),    # "sadness" used for repentance
+    ("සෝකය",                        "පශ්චාත්තාපය"),    # "grief" used for repentance
+    # ── Grace / blessing ─────────────────────────────────────────
+    ("කරුණාකිරීම",                  "කරුණාව"),         # "showing mercy" used for grace
+    ("ශ්‍රේෂ්ඨ ආශිර්වාදය",          "දිව්‍ය ආශිර්වාදය"),
+    ("සාධාරණ ජීවිතය",               "සදාකාලික ජීවිතය"), # "ordinary life" for eternal life
+    # ── Gospel / Word ────────────────────────────────────────────
+    ("යහපත් ශ්‍රාවකය",             "සුවිශේෂය"),       # wrong for Gospel
+    ("යහපත් වදන",                   "සුවිශේෂය"),
+    ("දේව වදන",                     "දේව වචනය"),
+    ("දෙව් කතාව",                   "දේව වචනය"),
+    # ── Unnatural literal translations of English idioms ─────────
+    ("හිස ඔතා ගැනීමට",             "සම්පූර්ණයෙන් තේරුම් ගැනීමට"),
+    ("හිස ඔතා ගත හැකි",            "සම්පූර්ණයෙන් තේරුම් ගත හැකි"),
+    ("හිස ඔතා",                     "සම්පූර්ණයෙන් තේරුම් ගත"),
+    ("හිස දිරවා",                   "සම්පූර්ණයෙන් ග්‍රහණය කර"),
+    # ── Lord ─────────────────────────────────────────────────────
+    ("ස්වාමිවරයා",                  "ස්වාමීන් වහන්සේ"),
+    ("ස්වාමියා",                    "ස්වාමීන් වහන්සේ"),
 ]
 
 def _apply_respectful_titles(text: str, religion: str = "Buddhism") -> str:
@@ -1264,6 +1346,29 @@ _SI_BOOK_CITE_RE = re.compile(
     re.UNICODE,
 )
 
+# Sinhala Bible book names that should NOT appear in an answer unless the
+# retrieved context actually mentions them.  When the LLM hallucinates a
+# tangential book reference (e.g. "1 රජයේ රජු …" in a John-1:1 answer)
+# we want to flag it.
+_SI_BIBLE_BOOK_NAMES = [
+    "උත්පත්ති", "පිටත් වීම", "ලේවී", "ගණනා", "ද්විතීය කථාව", "ද්විතීය",
+    "යෝෂුවා", "විනිසුරුවරු", "රූත්", "සාමුවෙල්", "රාජාවලිය", "රජ",
+    "ඉතිහාස", "එස්රා", "නෙහෙමියා", "එස්තර්", "යෝබ්", "ගීතිකා",
+    "හිතෝපදේශ", "ප්‍රාසංගිකයා", "සංගීත", "යෙසායා", "යෙරෙමියා",
+    "විලාප", "එසෙකෙල්", "දානියෙල්", "හොෂේ", "යෝවෙල්", "ආමොස්",
+    "ඔබදියා", "යෝනා", "මීකා", "නාහුම්", "හබක්කුක්", "සෙෆනියා",
+    "හගයි", "සකරියා", "මලාකි",
+    "මතෙව්", "මාර්කු", "ලූකා", "යොහාන්", "ක්‍රියා", "රෝම",
+    "කොරින්ති", "ගලාති", "එෆේසි", "පිලිප්පි", "කොලොසි",
+    "තෙසලෝනික", "තිමෝති", "තීතස්", "පීලෙමොන්", "හෙබ්‍රෙව්",
+    "යාකොව්", "පේතෘස්", "ප්‍රකාශිත",
+    # Numeric prefixes that often appear before book names
+    "1 රජ", "2 රජ", "1 සාමු", "2 සාමු", "1 රාජා", "2 රාජා",
+    "1 කොරින්ති", "2 කොරින්ති", "1 තෙසලෝ", "2 තෙසලෝ",
+    "1 තිමෝ", "2 තිමෝ", "1 පේතෘ", "2 පේතෘ", "1 යොහන්", "2 යොහන්",
+    "3 යොහන්", "1 ඉතිහාස", "2 ඉතිහාස",
+]
+
 def _scrub_fabricated_book_cites(text: str, context: str) -> str:
     """
     Remove inline book citation phrases (e.g. '1 කොරින්ති පොතේ ලියා ඇති පරිදි,')
@@ -1276,6 +1381,31 @@ def _scrub_fabricated_book_cites(text: str, context: str) -> str:
             return phrase
         return ""
     return _SI_BOOK_CITE_RE.sub(_keep, text).strip()
+
+
+def _scrub_off_topic_book_tangents(text: str, context: str) -> str:
+    """
+    Remove whole sentences that reference a Sinhala Bible book name
+    which is NOT present in the retrieved context.
+
+    Catches cases like:
+      "1 රජයේ රජු ... ස්වාමීන් වහන්සේ ..." appearing in a John-1 answer
+      "ද්විතීය කථාවේ අනාගතවක්තෘවරයා ..." in a Trinitarian answer
+    where the LLM has fabricated a tangential illustration from a different book.
+    """
+    context_lower = context.lower()
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    kept = []
+    for sent in sentences:
+        offending = False
+        for book in _SI_BIBLE_BOOK_NAMES:
+            if book in sent and book.lower() not in context_lower:
+                offending = True
+                print(f"  [scrub-tangent] Removing sentence with off-context book '{book}': {sent[:60]!r}")
+                break
+        if not offending:
+            kept.append(sent)
+    return " ".join(kept).strip()
 
 
 def _scrub_question_echo(text: str) -> str:
@@ -1461,38 +1591,75 @@ def _review_translation(
             ),
             "Christianity": (
                 "මෙය ක්‍රිස්තියානි පිළිතුරකි. නිවැරදි ක්‍රිස්තියානි සිංහල පාරිභාෂිතය භාවිත කරන්න.\n\n"
-                "වැදගත් ශබ්ද නිවැරදිකිරීම් (Google Translate සාමාන්‍ය වැරදි):\n"
-                "  ගැලවීම          → salvation — 'escape', 'rescue', 'relief' නොවේ\n"
-                "  ත්‍රිත්වය       → Trinity — 'three groups', 'trio', 'triple' නොවේ\n"
-                "  කරුණාව          → grace (දෛවීය) — 'mercy' පමණ නොවේ\n"
-                "  මිදීම           → redemption — 'freedom' හෝ 'release' පමණ නොවේ\n"
-                "  සදාකාලික ජීවිතය → eternal life — 'everlasting living' නොවේ\n"
-                "  ඇදහිල්ල        → faith — 'trust' හෝ 'belief' පමණ නොවේ\n"
-                "  පාපය            → sin — 'mistake' හෝ 'wrongdoing' නොවේ\n"
-                "  සමාව            → forgiveness — 'excuse' නොවේ\n"
-                "  බාප්තිස්මය      → baptism — 'bathing' හෝ 'washing' නොවේ\n"
-                "  ශුද්ධ කොමියුනියන් → Holy Communion / Eucharist — 'holy meal' නොවේ\n"
-                "  යාච්ඤාව         → prayer — 'request' හෝ 'begging' නොවේ\n"
-                "  සුවිශේෂය         → Gospel — 'good news' පමණ නොවේ\n"
-                "  සභාව             → Church — 'assembly' හෝ 'meeting' පමණ නොවේ\n"
-                "  පරිශුද්ධ ආත්මය  → Holy Spirit — 'holy soul' හෝ 'pure soul' නොවේ\n"
-                "  ස්වර්ගය          → heaven — 'sky' නොවේ\n"
-                "  නිරය             → hell\n"
-                "  පශ්චාත්තාපය      → repentance — 'regret' පමණ නොවේ\n"
-                "  ශුද්ධ ලියවිල්ල  → Bible / scripture\n"
-                "  බයිබලය           → Bible — 'බිබලය' හෝ 'බිබල' නොවේ (spelling නිවැරදිය: බ-යි-බ-ල-ය)\n"
-                "  තෑග්ග / ප්‍රදානය → gift (දෙවියන් වහන්සේගෙන් ලැබෙන) — 'ආගෝපාදා' හෝ ව්‍යාජ වචන නොවේ\n"
-                "  දිව් බස / භාෂාවන් → tongues (spiritual gift) — 'languages' පමණ නොවේ\n"
-                "  අභිරහස           → mystery — 'secret' හෝ 'puzzle' නොවේ\n"
-                "  සාක්ෂිය          → testimony / witness\n"
-                "  දිව්‍ය ආශිර්වාදය → blessing — 'good luck' නොවේ\n"
-                "  ප්‍රකාශය          → revelation / prophecy — context අනුව\n\n"
-                "විශේෂ අවවාදය: ඉහත ලැයිස්තුවේ නොමැති ඕනෑම වචනයක් "
-                "සිංහලෙන් නොව ව්‍යාජ ශබ්දයක් ලෙස පෙනේ නම් (උදා. 'ආගෝපාදා', "
-                "'ප්‍රේෂිතා', 'ශාන්තිකා' ආදී), එය Google Translate දෝෂයකි — "
-                "ඉංග්‍රීසි මුලාශ්‍රය දෙස බලා නිවැරදි සිංහල ශබ්දයෙන් ප්‍රතිස්ථාපනය කරන්න.\n"
-                "- 'ත්‍රිපිටකය', 'නිර්වාණය' හෝ බෞද්ධ සංකල්ප ක්‍රිස්තියානි පිළිතුරක "
-                "ඇතුළත් නොකරන්න."
+
+                "═══ ත්‍රිත්වයේ පුද්ගලයින් — CRITICAL ═══\n"
+                "  Holy Spirit      → පරිශුද්ධ ආත්මය\n"
+                "     WRONG: 'ශුද්ධ ආත්මය', 'ශුද්ධාත්මය', 'සිත් වායුව', 'පරිචාරක පවුල්', 'ශුද්ධ ගෝස්ට්'\n"
+                "  God the Father   → පිතාවන් වහන්සේ\n"
+                "     WRONG: 'පියා දෙවියන්', 'පිය දෙවිඳු', 'පියා (දෙවියන්)'\n"
+                "  Jesus Christ     → ජේසුස් ක්‍රිස්තුස් වහන්සේ\n"
+                "     WRONG: 'යේසුස්' — spelling: ජේ-සු-ස් (not යේ)\n"
+                "  Christ (person)  → ක්‍රිස්තුස්\n"
+                "     WRONG: 'ක්‍රිස්තුවන්' (= Christians), 'ක්‍රිස්තියානි'\n"
+                "  Son of God       → දෙවියන්ගේ පුත්‍රයා\n"
+                "     WRONG: 'පුතා', 'දරුවා'\n"
+                "  Lord             → ස්වාමීන් වහන්සේ\n"
+                "     WRONG: 'ස්වාමිවරයා', 'ස්වාමියා'\n"
+                "  God              → දෙවියන් වහන්සේ / දෙවිඳු\n\n"
+
+                "═══ ගැලවීම හා ශාස්ත්‍ර ═══\n"
+                "  salvation        → ගැලවීම — WRONG: 'ගොඩ නැගීම', 'නිදහස', 'ගලවා ගැනීම', 'escape'\n"
+                "  Trinity          → ත්‍රිත්වය — WRONG: 'ත්‍රිකෝණය', 'ත්‍රිමූර්තිය', 'ත්‍රිදේවය'\n"
+                "  redemption       → මිදීම — WRONG: 'නිදහස' alone, 'release'\n"
+                "  atonement        → ප්‍රායශ්චිත්තය\n"
+                "  eternal life     → සදාකාලික ජීවිතය — WRONG: 'සාධාරණ ජීවිතය'\n"
+                "  resurrection     → නැවත පිබිදීම / කුස්ස\n"
+                "  incarnation      → මනුෂ්‍යාවතාරය\n"
+                "  second coming    → ජේසුස් වහන්සේගේ දෙවන ආගමනය\n"
+                "  Kingdom of God   → දෙව් රාජ්‍යය — WRONG: 'ස්වර්ග රාජ්‍යය' alone\n\n"
+
+                "═══ විශ්වාසය හා පාපය ═══\n"
+                "  faith            → ඇදහිල්ල — WRONG: 'විශ්වාසය' (generic trust)\n"
+                "  sin              → පාපය — WRONG: 'දෝෂය', 'වරද', 'mistake'\n"
+                "  forgiveness      → සමාව — WRONG: 'excuse', 'excuse කිරීම'\n"
+                "  repentance       → පශ්චාත්තාපය — WRONG: 'කනගාටුව', 'සෝකය', 'regret'\n"
+                "  grace            → කරුණාව (දෛවීය) — WRONG: 'mercy' alone, 'කරුණාකිරීම'\n"
+                "  love (God's)     → ආදරය / ප්‍රේමය\n"
+                "  hope             → ප්‍රත්‍යාශාව\n"
+                "  covenant         → ගිවිසුම — WRONG: 'ශුද්ධ හදවත'\n"
+                "  prophecy         → ප්‍රවාදය / ප්‍රකාශය\n"
+                "  testimony        → සාක්ෂිය\n"
+                "  blessing         → ආශිර්වාදය / දිව්‍ය ආශිර්වාදය — WRONG: 'good luck'\n\n"
+
+                "═══ යාච්ඤාව හා නමස්කාරය ═══\n"
+                "  prayer           → යාච්ඤාව — WRONG: 'ඉල්ලීම', 'request', 'begging'\n"
+                "  worship          → නමස්කාරය / ආරාධනය — WRONG: 'වන්දනා කිරීම' (Buddhist)\n"
+                "  praise           → ස්තුතිය\n"
+                "  fasting          → උපවාසය\n"
+                "  meditation       → භාවනාව (but prefer 'යාච්ඤාව' for Christian prayer)\n\n"
+
+                "═══ ශාස්ත්‍රය හා පල්ලිය ═══\n"
+                "  Bible / scripture → ශුද්ධ ලියවිල්ල / බයිබලය\n"
+                "     WRONG: 'බිබලය', 'ශුද්ධ ග්‍රන්ථය', 'ධර්ම ග්‍රන්ථය', 'ත්‍රිපිටකය'\n"
+                "  New Testament    → නව ගිවිසුම\n"
+                "  Old Testament    → පැරණි ගිවිසුම\n"
+                "  Gospel           → සුවිශේෂය — WRONG: 'යහපත් ශ්‍රාවකය', 'good news story'\n"
+                "  Word of God      → දේව වචනය — WRONG: 'දෙව් කතාව'\n"
+                "  Church           → පල්ලිය — WRONG: 'සභාව', 'දේවාලය' (Hindu), 'ශාස්ත්‍ර ශ්‍රේෂ්ඨය'\n"
+                "  pastor / priest  → පාස්තෝරතුමා / පූජකතුමා\n"
+                "  disciple         → ශිෂ්‍යයා / අනුගාමිකයා\n"
+                "  apostle          → අපෝස්තලවරයා\n"
+                "  prophet          → ප්‍රවාදියා\n\n"
+
+                "═══ ගෞරවාත්මක ශීර්ෂ ═══\n"
+                "  baptism          → බාප්තිස්මය — WRONG: 'ස්නාන කිරීම', 'දිය බෑම'\n"
+                "  Holy Communion / Eucharist → දිව්‍ය සත්ප්‍රසාදය\n"
+                "     WRONG: 'ශුද්ධ කොමියුනියන්', 'ශුද්ධ භෝජනය', 'ශුද්ධ රාත්‍රී භෝජනය'\n"
+                "  heaven           → ස්වර්ගය — WRONG: 'ආකාශය', 'sky', 'දෙව්ලොව'\n"
+                "  hell             → නිරය — WRONG: 'පාතාලය'\n\n"
+
+                "විශේෂ: ව්‍යාජ සිංහල ශබ්ද ඉංග්‍රීසි මූලාශ්‍රය බලා නිවැරදි කරන්න.\n"
+                "- 'ත්‍රිපිටකය', 'නිර්වාණය', 'ධර්මය' හෝ බෞද්ධ/හින්දු සංකල්ප ඇතුළත් නොකරන්න."
             ),
         }.get(religion, "නිවැරදි සහ ස්වාභාවික සිංහල ආගමික පාරිභාෂිතය භාවිත කරන්න.")
 
@@ -1589,6 +1756,7 @@ def _english_context_then_translate(
         for r in en_res
     )
     translated  = _scrub_fabricated_book_cites(translated, en_context)
+    translated  = _scrub_off_topic_book_tangents(translated, en_context)
     if target_lang in ("si", "ta"):
         translated = _apply_respectful_titles(translated, religion)
     translated, extra_warnings = moderate_output(translated, en_context, religion, target_lang)
@@ -1673,6 +1841,7 @@ def _answer_with_native_christianity_chunks(
 
     raw = _apply_respectful_titles(raw, religion)
     raw = _scrub_fabricated_book_cites(raw, context)
+    raw = _scrub_off_topic_book_tangents(raw, context)
     final_answer, warnings = moderate_output(raw, context, religion, target_lang)
     final_answer = _scrub_question_echo(final_answer)
     final_answer = _apply_respectful_titles(final_answer, religion)
