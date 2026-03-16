@@ -1,7 +1,11 @@
 import os
 import threading
+import httpx
 from pathlib import Path
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,12 +63,20 @@ app.add_middleware(
 
 
 # ════════════════════════════════════════════════════════════════
-# Request model
+# Request models
 # ════════════════════════════════════════════════════════════════
 class QuestionRequest(BaseModel):
     question: str
     religion: str = "Buddhism"   # "Buddhism" | "Christianity"
     language: str = "en"         # "en" only for Christianity; "en"|"si"|"ta" for Buddhism
+
+
+class FeedbackRequest(BaseModel):
+    question: str = ""
+    rating:   str = ""
+    comment:  str = ""
+    religion: str = ""
+    language: str = "English"
 
 
 # ════════════════════════════════════════════════════════════════
@@ -101,13 +113,12 @@ def health():
             },
         }
 
-
     return {
-        "status":        "ready" if _ready else ("error" if _load_error else "loading"),
-        "load_error":    _load_error,
-        "files":         files_info,
+        "status":         "ready" if _ready else ("error" if _load_error else "loading"),
+        "load_error":     _load_error,
+        "files":          files_info,
         "indexes_loaded": list(_indexes.keys()),
-        "religions":     {r: list(ids.keys()) for r, ids in _religion_ids.items()},
+        "religions":      {r: list(ids.keys()) for r, ids in _religion_ids.items()},
     }
 
 
@@ -145,3 +156,38 @@ def ask_question(request: QuestionRequest):
         "flagged":            result.get("flagged", False),
         "warnings":           result.get("warnings", []),
     }
+
+
+@app.post("/feedback")
+async def submit_feedback(payload: FeedbackRequest):
+    notion_token = os.environ.get("NOTION_TOKEN", "")
+    notion_db_id = os.environ.get("NOTION_DB_ID", "")
+
+    if not notion_token or not notion_db_id:
+        raise HTTPException(status_code=503, detail="Feedback not configured")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://api.notion.com/v1/pages",
+            headers={
+                "Authorization":  f"Bearer {notion_token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type":   "application/json",
+            },
+            json={
+                "parent": {"database_id": notion_db_id},
+                "properties": {
+                    "Question": {"title":     [{"text": {"content": payload.question[:2000]}}]},
+                    "Rating":   {"select":    {"name": payload.rating}},
+                    "Comment":  {"rich_text": [{"text": {"content": payload.comment[:2000]}}]},
+                    "Religion": {"rich_text": [{"text": {"content": payload.religion}}]},
+                    "Language": {"rich_text": [{"text": {"content": payload.language}}]},
+                },
+            },
+            timeout=10,
+        )
+
+    if resp.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"Notion error: {resp.text}")
+
+    return {"ok": True}

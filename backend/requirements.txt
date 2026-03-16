@@ -12,3 +12,4 @@ langdetect
 numpy
 onnxruntime
 huggingface-hub
+httpx
