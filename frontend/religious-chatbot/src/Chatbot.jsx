@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   FaChevronLeft, FaChevronRight, FaPlus, FaRightLeft,
   FaGlobe, FaBookOpen, FaTriangleExclamation, FaXmark,
-  FaCircleXmark, FaPaperPlane, FaSpinner,
+  FaCircleXmark, FaPaperPlane, FaSpinner, FaFlag, FaThumbsDown,
 } from "react-icons/fa6";
 import { MdError } from "react-icons/md";
 import { RELIGIONS, ReligionSymbol } from "./Landingpage";
@@ -83,6 +83,166 @@ const ErrorToast = ({ message, onClose }) => (
   </div>
 );
 
+// ─── Feedback Modal ───────────────────────────────────────────
+const RATINGS = [
+  { value: "⭐ Poor",  label: "Poor",  emoji: "😞" },
+  { value: "⭐⭐ Ok",   label: "Ok",    emoji: "😐" },
+  { value: "⭐⭐⭐ Good", label: "Good", emoji: "😊" },
+];
+
+const FeedbackModal = ({ onClose, prefillQuestion, religion, language, palette }) => {
+  const [rating,   setRating]   = useState("");
+  const [comment,  setComment]  = useState("");
+  const [question, setQuestion] = useState(prefillQuestion || "");
+  const [status,   setStatus]   = useState("idle"); // idle | loading | success | error
+
+  const handleSubmit = async () => {
+    if (!rating) return;
+    setStatus("loading");
+    try {
+      const res = await fetch(`${API_BASE}/feedback`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ question, rating, comment, religion, language }),
+      });
+      if (!res.ok) throw new Error();
+      setStatus("success");
+      setTimeout(onClose, 1800);
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 200,
+      background: "#0006", backdropFilter: "blur(3px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 16,
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: palette.headerBg, borderRadius: 20,
+        border: `1px solid ${palette.border}`,
+        boxShadow: "0 20px 60px #0003",
+        width: "100%", maxWidth: 440, padding: "28px 28px 24px",
+        fontFamily: "'Lora', serif",
+        animation: "fadeUp 0.25s ease forwards",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <FaFlag size={14} color={palette.accentColor} />
+            <span style={{ fontFamily: "'Cinzel', serif", fontSize: 14, letterSpacing: 0.5, color: palette.text }}>
+              Share Feedback
+            </span>
+          </div>
+          <button onClick={onClose} style={{
+            background: "none", border: "none", cursor: "pointer",
+            color: palette.textMuted, display: "flex", padding: 4,
+          }}>
+            <FaXmark size={15} />
+          </button>
+        </div>
+
+        {status === "success" ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: palette.accentDark }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>🙏</div>
+            <div style={{ fontFamily: "'Cinzel', serif", fontSize: 13, letterSpacing: 0.5 }}>
+              Thank you for your feedback!
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Question field */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11.5, color: palette.textMuted, display: "block", marginBottom: 6, letterSpacing: 0.3 }}>
+                QUESTION (optional)
+              </label>
+              <textarea
+                value={question}
+                onChange={e => setQuestion(e.target.value)}
+                rows={2}
+                style={{
+                  width: "100%", background: palette.inputBg,
+                  border: `1px solid ${palette.border}`, borderRadius: 10,
+                  padding: "9px 12px", fontSize: 13, color: palette.text,
+                  fontFamily: "'Lora', serif", resize: "none", outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Rating */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11.5, color: palette.textMuted, display: "block", marginBottom: 8, letterSpacing: 0.3 }}>
+                RESPONSE QUALITY *
+              </label>
+              <div style={{ display: "flex", gap: 10 }}>
+                {RATINGS.map(r => (
+                  <button key={r.value} onClick={() => setRating(r.value)} style={{
+                    flex: 1, padding: "10px 6px", borderRadius: 12,
+                    border: `1.5px solid ${rating === r.value ? palette.accentColor : palette.border}`,
+                    background: rating === r.value ? `${palette.accentColor}18` : "transparent",
+                    cursor: "pointer", display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 4, transition: "all 0.15s",
+                  }}>
+                    <span style={{ fontSize: 20 }}>{r.emoji}</span>
+                    <span style={{ fontSize: 11, color: rating === r.value ? palette.accentDark : palette.textMuted, fontFamily: "'Lora', serif" }}>
+                      {r.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Comment */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 11.5, color: palette.textMuted, display: "block", marginBottom: 6, letterSpacing: 0.3 }}>
+                ADDITIONAL COMMENTS
+              </label>
+              <textarea
+                value={comment}
+                onChange={e => setComment(e.target.value)}
+                placeholder="What could be improved?"
+                rows={3}
+                style={{
+                  width: "100%", background: palette.inputBg,
+                  border: `1px solid ${palette.border}`, borderRadius: 10,
+                  padding: "9px 12px", fontSize: 13, color: palette.text,
+                  fontFamily: "'Lora', serif", resize: "none", outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {status === "error" && (
+              <div style={{ marginBottom: 12, fontSize: 12, color: "#c62828", background: "#ffebee", borderRadius: 8, padding: "7px 12px" }}>
+                Submission failed — please try again.
+              </div>
+            )}
+
+            {/* Submit */}
+            <button onClick={handleSubmit} disabled={!rating || status === "loading"} style={{
+              width: "100%", padding: "11px",
+              background: rating
+                ? `linear-gradient(135deg, ${palette.accentColor}, ${palette.accentDark})`
+                : palette.border,
+              border: "none", borderRadius: 12,
+              color: rating ? "#fff" : palette.textMuted,
+              fontFamily: "'Cinzel', serif", fontSize: 13, letterSpacing: 0.5,
+              cursor: rating ? "pointer" : "not-allowed",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              transition: "all 0.2s",
+            }}>
+              {status === "loading" ? <FaSpinner size={13} className="spinner" /> : "Submit Feedback"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ─── Main Chatbot Component ───────────────────────────────────
 export default function Chatbot({ religion, onSwitchReligion }) {
   const cfg = RELIGIONS[religion] || RELIGIONS.Buddhism;
@@ -97,6 +257,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
   const [isTyping, setIsTyping]                 = useState(false);
   const [error, setError]                       = useState(null);
   const [isConnected, setIsConnected]           = useState(null);
+  const [feedbackModal, setFeedbackModal]       = useState(null); // null | { question }
 
   const messagesEndRef = useRef(null);
   const inputRef       = useRef(null);
@@ -333,6 +494,17 @@ export default function Chatbot({ religion, onSwitchReligion }) {
           }}>
             <FaRightLeft size={12} /> Religion
           </button>
+
+          {/* Feedback button */}
+          <button className="icon-btn" onClick={() => setFeedbackModal({ question: "" })} style={{
+            padding: "7px 14px", border: `1.5px solid ${cfg.border}`,
+            borderRadius: 20, background: "transparent",
+            fontFamily: "'Lora', serif", fontSize: 12.5,
+            color: cfg.textMuted, cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 6, transition: "background 0.15s",
+          }}>
+            <FaFlag size={12} /> Feedback
+          </button>
         </div>
 
         {/* Chat Area */}
@@ -383,6 +555,23 @@ export default function Chatbot({ religion, onSwitchReligion }) {
                   </div>
                   {msg.role === "bot" && <SourcePills sources={msg.sources} palette={cfg} />}
                   {msg.role === "bot" && msg.warning && <ConfidenceWarning />}
+                  {msg.role === "bot" && (
+                    <button
+                      onClick={() => setFeedbackModal({ question: messages.find(m => m.id === msg.id - 1)?.text || "" })}
+                      title="Report an issue"
+                      style={{
+                        marginTop: 6, background: "none", border: "none",
+                        cursor: "pointer", color: cfg.textMuted, display: "flex",
+                        alignItems: "center", gap: 5, fontSize: 11, padding: "2px 0",
+                        fontFamily: "'Lora', serif", opacity: 0.6,
+                        transition: "opacity 0.15s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                      onMouseLeave={e => e.currentTarget.style.opacity = 0.6}
+                    >
+                      <FaThumbsDown size={10} /> Report issue
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -457,6 +646,15 @@ export default function Chatbot({ religion, onSwitchReligion }) {
       {showLangDropdown && (
         <div onClick={() => setShowLangDropdown(false)}
           style={{ position: "fixed", inset: 0, zIndex: 50 }} />
+      )}
+      {feedbackModal !== null && (
+        <FeedbackModal
+          onClose={() => setFeedbackModal(null)}
+          prefillQuestion={feedbackModal.question}
+          religion={religion}
+          language={language}
+          palette={cfg}
+        />
       )}
     </div>
   );
