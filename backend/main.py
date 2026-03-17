@@ -241,6 +241,26 @@ def religion_status(religion: str):
         t.start()
     return {"status": "loading"}
 
+# ════════════════════════════════════════════════════════════════
+# Memory
+# ════════════════════════════════════════════════════════════════
+@app.get("/memory")
+def memory_stats():
+    import gc
+    import psutil, os
+    from retrieve import _indexes, _loaded_religions, _cons
+
+    proc = psutil.Process(os.getpid())
+    mem  = proc.memory_info()
+
+    return {
+        "rss_mb":           round(mem.rss   / 1_048_576, 1),  # actual RAM used (what Render sees)
+        "vms_mb":           round(mem.vms   / 1_048_576, 1),  # virtual memory
+        "loaded_religions": list(_loaded_religions),
+        "indexes_loaded":   {r: idx.ntotal for r, idx in _indexes.items()},
+        "db_connections":   list(_cons.keys()),
+        "gc_counts":        gc.get_count(),   # (gen0, gen1, gen2) unreachable objects
+    }
 
 # ════════════════════════════════════════════════════════════════
 # Feedback
