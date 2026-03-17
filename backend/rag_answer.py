@@ -224,6 +224,8 @@ _OTHER_RELIGION_TERMS = {
 # Blocks questions that ask about OTHER religions in the query itself.
 _CROSS_RELIGION_QUERY_TERMS = {
     "Hinduism": [
+        # Only block terms from OTHER religions — never own-scripture names
+        # (gita, vedas, upanishad, etc. are Hinduism's own texts)
         "islam", "muslim", "quran", "christianity", "christian", "bible",
         "buddhism", "buddhist", "tipitaka", "judaism", "jewish", "torah",
         "sikhism", "sikh", "jesus", "allah", "buddha",
@@ -244,13 +246,24 @@ _CROSS_RELIGION_QUERY_TERMS = {
 }
 
 # Patterns that explicitly ask what another religion says/teaches
+# Patterns that are ALWAYS cross-religion regardless of which chatbot is active.
+# Do NOT include own-scripture names like gita/vedas (Hinduism) or tipitaka (Buddhism)
+# here — those are checked per-religion in _CROSS_RELIGION_QUERY_TERMS instead.
 _CROSS_RELIGION_ASK_PATTERNS = [
     r"\bwhat does (islam|buddhism|hinduism|judaism|sikhism|christianity)\b.{0,40}(say|teach|believe|think|claim|state)",
-    r"\baccording to (islam|buddhism|hinduism|judaism|sikhism|the quran|the bible|the torah|the vedas)\b",
+    r"\baccording to (islam|buddhism|hinduism|judaism|sikhism|the quran|the bible|the torah)\b",
     r"\b(islam|buddhism|hinduism|judaism|sikhism)'s (view|teaching|belief|perspective|stance)\b",
     r"\bin (islam|buddhism|hinduism|judaism|sikhism)\b.{0,30}(jesus|god|salvation|heaven|sin|prayer)",
-    r"\b(quran|torah|vedas|gita|tipitaka)\b.{0,30}(say|teach|mention|describe|speak)",
 ]
+
+# Per-religion scripture ask patterns — only fired when the named scripture belongs
+# to a DIFFERENT religion than the active chatbot.
+_OWN_SCRIPTURE_NAMES = {
+    "Hinduism":    {"gita", "bhagavad gita", "vedas", "upanishad", "upanishads",
+                    "mahabharata", "ramayana", "purana", "puranas"},
+    "Buddhism":    {"tipitaka", "dhammapada", "pali canon", "nikayas"},
+    "Christianity":{"bible", "new testament", "old testament", "gospel", "gospels"},
+}
 
 _FALLBACK_MESSAGES = {
     "en": {
@@ -469,9 +482,24 @@ def moderate_input(query: str, religion: str = "Buddhism") -> tuple[bool, str]:
             return False, "hate_speech"
 
     # 4. Cross-religion ask patterns (e.g. "what does Islam say about X")
+    # Skip the "what does <religion> say" pattern if the religion named IS the active one.
+    own_scriptures = _OWN_SCRIPTURE_NAMES.get(religion, set())
     for pattern in _CROSS_RELIGION_ASK_PATTERNS:
-        if re.search(pattern, q):
-            return False, "cross_religion_query"
+        m = re.search(pattern, q)
+        if not m:
+            continue
+        matched_text = m.group(0).lower()
+        # If every religious keyword in the match belongs to this religion's own canon, allow it
+        if any(s in matched_text for s in own_scriptures):
+            continue
+        # Also allow "what does hinduism say" inside the Hinduism chatbot, etc.
+        if religion.lower() in matched_text and not any(
+            other in matched_text
+            for other in ("islam", "buddhism", "christianity", "judaism", "sikhism")
+            if other != religion.lower()
+        ):
+            continue
+        return False, "cross_religion_query"
 
     # 5. Query contains terms belonging to a DIFFERENT religion
     #    e.g. asking "what does the Quran say" inside the Christianity chatbot
@@ -2246,12 +2274,22 @@ def answer_question(
     raw_answer = re.sub(r"<think>.*?</think>", "", raw_answer, flags=re.DOTALL)
     raw_answer = re.sub(r"<think>.*$",         "", raw_answer, flags=re.DOTALL).strip()
     raw_answer = _trim_incomplete_sentence(raw_answer)
+    raw_answer = _scrub_question_echo(raw_answer)
 
     final_answer, warnings = moderate_output(raw_answer, context, religion, lang)
+    final_answer = _scrub_question_echo(final_answer)
+
+    # Patch missing book field so sources work for DB schemas without a book column
+    # (e.g. Hinduism — falls back to pitaka/section label or source)
+    for r in results:
+        if not r.get("book"):
+            r["book"] = (r.get("pitaka") or r.get("source") or "").strip()
 
     answer_lower    = final_answer.lower()
-    matched         = [r for r in results if r["book"].lower() in answer_lower]
-    display_results = matched if matched else results
+    matched         = [r for r in results if r.get("book", "").lower() in answer_lower and r.get("book")]
+    display_results = matched if matched else [r for r in results if r.get("book")]
+    if not display_results:
+        display_results = results
     src, scores_out = _unique_sources(display_results)
 
     return {

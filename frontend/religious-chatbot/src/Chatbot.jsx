@@ -156,7 +156,7 @@ const FeedbackModal = ({ onClose, prefillQuestion, religion, language, palette }
             {/* Question field */}
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 11.5, color: palette.textMuted, display: "block", marginBottom: 6, letterSpacing: 0.3 }}>
-                QUESTION (optional)
+                QUESTION
               </label>
               <textarea
                 value={question}
