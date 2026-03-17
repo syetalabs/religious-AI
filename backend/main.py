@@ -26,13 +26,12 @@ def _background_load():
     global _ready, _load_error
     try:
         print("=== Background: downloading data files from HuggingFace ===")
-        ensure_data_files(["Buddhism", "Christianity"])  # Hinduism downloads on first /prepare
+        ensure_data_files(["Buddhism", "Christianity"])
 
         print("=== Background: loading Buddhism index + embedding model ===")
         from retrieve import _lazy_load
-        _lazy_load("Buddhism")   # only pre-load Buddhism; others load on demand
+        _lazy_load("Buddhism")   # only pre-load Buddhism
 
-        # Mark Buddhism as ready in per-religion state too
         with _religion_lock:
             _religion_status["Buddhism"] = "ready"
 
@@ -156,6 +155,8 @@ def ask_question(request: QuestionRequest):
 
     from retrieve import _lazy_load
     from rag_answer import answer_question
+    
+    # This call is now safe; if it hits 512MB bounds, _lazy_load will evict first
     _lazy_load(request.religion)
 
     result = answer_question(
@@ -185,15 +186,8 @@ def _prepare_religion_bg(religion: str):
         _religion_status[religion] = "loading"
 
     try:
-        # Unload any previously loaded non-Buddhism religion to free RAM
-        from retrieve import _unload_religion, _loaded_religions
-        for loaded in list(_loaded_religions):
-            if loaded != "Buddhism" and loaded != religion:
-                print(f"=== /prepare: unloading {loaded} to free RAM ===")
-                _unload_religion(loaded)
-                with _religion_lock:
-                    _religion_status.pop(loaded, None)
-
+        # CHANGED: Removed the messy unloading loop from here. 
+        # _lazy_load in retrieve.py handles it flawlessly now.
         print(f"=== /prepare: downloading {religion} data ===")
         ensure_data_files([religion])
 
@@ -242,7 +236,6 @@ def religion_status(religion: str):
         return {"status": "error", "error": _religion_error.get(religion, "Unknown error")}
     if status == "ready":
         return {"status": "ready"}
-    # idle means /prepare hasn't been called yet — trigger it now as fallback
     if status == "idle":
         t = threading.Thread(target=_prepare_religion_bg, args=(religion,), daemon=True)
         t.start()
