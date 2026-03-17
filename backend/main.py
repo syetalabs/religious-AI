@@ -21,7 +21,7 @@ def _background_load():
     global _ready, _load_error
     try:
         print("=== Background: downloading data files from HuggingFace ===")
-        ensure_data_files()   # downloads both Buddhism and Christianity
+        ensure_data_files()   # downloads Buddhism, Christianity, and Hinduism
 
         print("=== Background: loading FAISS indexes + embedding model ===")
         from retrieve import _lazy_load
@@ -67,8 +67,8 @@ app.add_middleware(
 # ════════════════════════════════════════════════════════════════
 class QuestionRequest(BaseModel):
     question: str
-    religion: str = "Buddhism"   # "Buddhism" | "Christianity"
-    language: str = "en"         # "en" only for Christianity; "en"|"si"|"ta" for Buddhism
+    religion: str = "Buddhism"   # "Buddhism" | "Christianity" | "Hinduism"
+    language: str = "en"         # "en" only for Hinduism; "en"|"si"|"ta" for Buddhism/Christianity
 
 
 class FeedbackRequest(BaseModel):
@@ -101,6 +101,10 @@ def health():
             "faiss": Path("/tmp/religious-ai-data/christianity/faiss_index-en-si-ta.bin"),
             "db":    Path("/tmp/religious-ai-data/christianity/chunks-en-si-ta.db"),
         },
+        "hinduism": {
+            "faiss": Path("/tmp/religious-ai-data/hinduism/faiss_index.bin"),
+            "db":    Path("/tmp/religious-ai-data/hinduism/chunks.db"),
+        },
     }.items():
         files_info[religion] = {
             "faiss_index": {
@@ -130,13 +134,14 @@ def ask_question(request: QuestionRequest):
         raise HTTPException(status_code=503, detail="Server is still loading data. Please retry in a moment.")
 
     # Validate religion
-    supported = ["Buddhism", "Christianity"]
+    supported = ["Buddhism", "Christianity", "Hinduism"]
     if request.religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {request.religion}. Supported: {supported}")
 
-    # All supported languages are passed through; rag_answer.py handles
-    # the translation path for Christianity Sinhala / Tamil.
+    # Hinduism only supports English for now
     language = request.language
+    if request.religion == "Hinduism" and language not in ("en", "english"):
+        language = "en"
 
     from retrieve import _lazy_load
     from rag_answer import answer_question

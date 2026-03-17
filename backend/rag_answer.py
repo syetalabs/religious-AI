@@ -63,6 +63,28 @@ def _detect_language(question: str, language: str) -> str:
 # ════════════════════════════════════════════════════════════════
 
 _PERSONAS_EN = {
+    "Hinduism": """You are a knowledgeable and compassionate Hindu guide speaking to someone seeking to understand Hinduism and its sacred scriptures.
+
+Rules you must follow without exception:
+- Answer ONLY using the scripture context provided between [Source: ...] tags. Do not use your own knowledge under any circumstances.
+- If the context does not contain enough information, say exactly:
+  "I do not have enough reliable scriptural context to answer this accurately."
+- Use simple, clear, everyday language that is welcoming to newcomers.
+- Begin with the most human, relatable aspect of the teaching before going deeper.
+- Keep answers concise — 3 to 5 sentences unless the question requires more detail.
+- Do not provide personal opinions or moral judgments.
+- Do not compare Hinduism with other religions.
+- Do not mix teachings from other traditions.
+- Maintain a warm, reverent, and welcoming tone at all times.
+- NEVER restate or paraphrase the user's question in your answer. Start directly with the answer.
+- When referencing scripture, ONLY mention a text name if it appears in the [Source: ...] tags above. Never cite a text from memory.
+
+CRITICAL — Quoting rules:
+- Do NOT cite specific verse references (e.g. Bhagavad Gita 2.47, Upanishad 1.1) unless those exact references appear word-for-word in the provided context.
+- Do NOT cite or mention any scripture name unless it appears in the [Source: ...] tags above.
+- Do NOT reproduce or paraphrase text not present in the provided context.
+- Never invent or recall verse references or text names from memory — only use what is explicitly in the context.""",
+
     "Buddhism": """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
 Rules you must follow without exception:
@@ -178,6 +200,12 @@ _HATE_PATTERNS = [
 ]
 
 _OTHER_RELIGION_TERMS = {
+    "Hinduism": [
+        "buddhism", "christianity", "islam", "judaism", "sikhism",
+        "quran", "bible", "torah", "tipitaka",
+        "buddha", "jesus", "allah", "moses",
+        "church", "mosque", "synagogue",
+    ],
     "Buddhism": [
         "christianity", "islam", "hinduism", "judaism", "sikhism",
         "quran", "bible", "torah", "vedas", "gita",
@@ -195,6 +223,12 @@ _OTHER_RELIGION_TERMS = {
 # ── Cross-religion INPUT detection ────────────────────────────────
 # Blocks questions that ask about OTHER religions in the query itself.
 _CROSS_RELIGION_QUERY_TERMS = {
+    "Hinduism": [
+        "islam", "muslim", "quran", "christianity", "christian", "bible",
+        "buddhism", "buddhist", "tipitaka", "judaism", "jewish", "torah",
+        "sikhism", "sikh", "jesus", "allah", "buddha",
+        "prophet muhammad", "mohammed",
+    ],
     "Buddhism": [
         "islam", "muslim", "quran", "christianity", "christian", "bible",
         "hinduism", "hindu", "vedas", "gita", "judaism", "jewish", "torah",
@@ -303,6 +337,11 @@ _GREETING_PATTERNS = re.compile(
 )
 
 _GREETING_RESPONSES = {
+    "Hinduism": {
+        "en": "Namaste! 🙏 Feel free to ask any question about Hinduism.",
+        "si": "ආයුබෝවන්! 🙏 හින්දු ධර්මය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න.",
+        "ta": "வணக்கம்! 🙏 இந்து மதம் பற்றி எதுவும் கேட்கலாம்.",
+    },
     "Buddhism": {
         "en": "Hi! 🙏 Feel free to ask any question about Buddhism.",
         "si": "ආයුබෝවන්! 🙏 බෞද්ධ ධර්මය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න.",
@@ -333,6 +372,15 @@ def _is_greeting(question: str) -> bool:
 
 
 _VERSE_REF_PATTERNS = {
+    "Hinduism": re.compile(
+        # Bhagavad Gita chapter:verse  e.g. BG 2.47 / Gita 18.66
+        r"\b(BG|Gita|Bhagavad\s*Gita)\s*\d+[:\.\-]\d+\b"
+        # Upanishad numeric ref e.g. "Chandogya 6.2.1"
+        r"|\b(Chandogya|Brihadaranyaka|Mandukya|Kena|Isha|Mundaka|Katha|Taittiriya|Aitareya|Prashna|Shvetashvatara)\s+\d+[:\.\-]\d+(?:[:\.\-]\d+)?\b"
+        # Generic verse shorthand e.g. "RV 1.1.1" (Rig Veda)
+        r"|\b(RV|AV|SV|YV)\s*\d+[:\.\-]\d+(?:[:\.\-]\d+)?\b",
+        re.IGNORECASE,
+    ),
     "Buddhism": re.compile(
         r"\b(SN|MN|DN|AN|KN|Dhp|Ud|Iti|Snp|Thag|Thig|Ja|Cp|Mil|Pv|Vv|Vb|Ds|Kv|Pp|Ps|Ya)\s*\d+[\.\d]*\b",
         re.IGNORECASE,
@@ -530,6 +578,22 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
             "Preserve the precise meaning of every religious or philosophical term. "
             "Output ONLY the English translation — no explanation, no extra text."
         ),
+        "Hinduism": (
+            "You are a translator. Translate the following question into "
+            "concise English suitable for a Hindu scripture search. "
+            "You MUST use the correct Hindu theological English term — never a generic word.\n\n"
+            "CRITICAL term mappings (use these EXACTLY):\n"
+            "  ධර්මය / தர்மம்           → dharma  (NOT duty alone)\n"
+            "  කර්මය / கர்மா            → karma\n"
+            "  මෝක්ෂය / மோட்சம்         → moksha / liberation\n"
+            "  ආත්මය / ஆத்மா            → atman / soul\n"
+            "  බ්‍රහ්මන් / பிரம்மன்     → Brahman (ultimate reality)\n"
+            "  සංසාරය / சம்சாரம்        → samsara (cycle of rebirth)\n"
+            "  ඇදහිල්ල / பக்தி         → bhakti (devotion)\n"
+            "  ඥානය / ஞானம்             → jnana (knowledge / wisdom)\n"
+            "  දෙවිඳු / கடவுள்          → God / Ishvara\n"
+            "Output ONLY the English translation — no explanation, no extra text."
+        ),
         "Christianity": (
             "You are a translator. Translate the following Sinhala or Tamil question into "
             "concise English suitable for a Christian Bible scripture search. "
@@ -614,8 +678,7 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
     src_lang = "Tamil" if _is_tamil(question) else "Sinhala"
 
     if religion == "Christianity":
-        _christianity_glossary = (
-            "═══ TAMIL → ENGLISH CHRISTIAN GLOSSARY ═══\n\n"
+        _christianity_glossary = (            "═══ TAMIL → ENGLISH CHRISTIAN GLOSSARY ═══\n\n"
 
             "CORE THEOLOGY:\n"
             "  இரட்சிப்பு       → salvation — NOT 'rescue' or 'escape'\n"
@@ -706,6 +769,55 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
             f"English query that will retrieve the right Bible passages.\n"
             f"5. Output ONLY the final English query — no explanation, no commentary.\n\n"
             f"{_christianity_glossary}"
+        )
+    elif religion == "Hinduism":
+        step2_system = (
+            "You are a Hindu scripture scholar fluent in Sanskrit, English, Sinhala, and Tamil.\n\n"
+            "Your task: verify that an English translation of a Hindu question "
+            "correctly preserves the theological and philosophical meaning of the key term.\n\n"
+            "Rules:\n"
+            f"1. Identify the main Hindu concept or term in the original {src_lang} question.\n"
+            "2. Check if the English translation captures its correct Hindu meaning "
+            "using the reference glossary below.\n"
+            "3. If the translation is correct, return it UNCHANGED.\n"
+            "4. If the translation is wrong or loses important nuance, return a corrected "
+            "English query that will retrieve the right Hindu scripture passages.\n"
+            "5. Output ONLY the final English query — no explanation, no commentary.\n\n"
+
+            "═══ KEY HINDU CONCEPT GLOSSARY ═══\n\n"
+
+            "ULTIMATE REALITY:\n"
+            "  Brahman             → the absolute/ultimate reality — NOT a person\n"
+            "  Atman / ஆத்மா / ආත්මය → individual soul / self — NOT just 'soul' generically\n"
+            "  Brahman = Atman     → non-dual identity (Advaita Vedanta)\n\n"
+
+            "LIBERATION AND CYCLE:\n"
+            "  Moksha / மோட்சம் / මෝක්ෂය  → liberation from samsara — NOT 'heaven'\n"
+            "  Samsara / சம்சாரம் / සංසාරය → cycle of birth, death, rebirth\n"
+            "  Karma / கர்மா / කර්මය      → intentional action and its consequences\n"
+            "  Dharma / தர்மம் / ධර්මය    → righteous duty/cosmic order — NOT just 'religion'\n\n"
+
+            "DEVOTION AND PATHS:\n"
+            "  Bhakti / பக்தி     → devotion / loving surrender to God\n"
+            "  Jnana / ஞானம்      → knowledge / wisdom path to liberation\n"
+            "  Karma yoga          → path of selfless action\n"
+            "  Raja yoga           → path of meditation\n\n"
+
+            "SCRIPTURE:\n"
+            "  Vedas               → oldest scriptures (Rig, Sama, Yajur, Atharva)\n"
+            "  Upanishads          → philosophical texts on Brahman/Atman\n"
+            "  Bhagavad Gita       → dialogue of Krishna and Arjuna on duty/liberation\n"
+            "  Puranas             → mythological/devotional texts\n"
+            "  Mahabharata         → epic containing the Bhagavad Gita\n"
+            "  Ramayana            → epic of Rama\n\n"
+
+            "DEITIES:\n"
+            "  Brahma              → creator god\n"
+            "  Vishnu              → preserver god\n"
+            "  Shiva               → destroyer/transformer god\n"
+            "  Krishna             → avatar of Vishnu\n"
+            "  Rama                → avatar of Vishnu\n"
+            "  Devi / Shakti       → divine feminine / goddess\n"
         )
     else:
         # Buddhism (original prompt)
@@ -1006,6 +1118,18 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
             if r.get("testament") == "New Testament":
                 return 1
             return 2
+        elif religion == "Hinduism":
+            # Prioritise: Upanishads > Bhagavad Gita > Puranas > other Smriti > Vedas
+            section = r.get("pitaka", "").lower()
+            if "upanishad" in section:
+                return 0
+            if "gita" in section or "bhagavad" in section:
+                return 1
+            if "purana" in section:
+                return 2
+            if "smriti" in section:
+                return 3
+            return 4
         return 0
 
     for r in sorted(results, key=lambda r: (_priority(r), -r["score"])):
@@ -1117,6 +1241,15 @@ def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
             "- Then support it with what the scripture says, citing the source book "
             "naturally (e.g. \"As found in the Samyutta Nikaya...\").\n"
             "- If the teaching has a practical dimension, briefly mention it.\n"
+            "- Do not use bullet points or lists. Write in flowing, warm prose."
+        )
+    if religion == "Hinduism":
+        return (
+            "- Do NOT restate or paraphrase the question. Start directly with the answer.\n"
+            "- Start with a simple, human explanation a newcomer can understand.\n"
+            "- Then support it with what the scripture says, citing the source text "
+            "naturally ONLY if that text appears in the [Source: ...] tags above.\n"
+            "- If the teaching has a spiritual or practical dimension, briefly mention it.\n"
             "- Do not use bullet points or lists. Write in flowing, warm prose."
         )
     return (
@@ -2095,6 +2228,7 @@ def answer_question(
     ref_note_map = {
         "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
         "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
+        "Hinduism":    "Do NOT cite specific verse numbers (like BG 2.47 or Chandogya 6.2.1)",
     }
     ref_note     = ref_note_map.get(religion, "Do NOT cite specific verse numbers")
     format_instr = _format_instructions(religion, _is_list_request(question), "en")

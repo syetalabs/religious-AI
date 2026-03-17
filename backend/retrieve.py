@@ -22,6 +22,11 @@ _RELIGION_PATHS = {
         "faiss": DATA_ROOT / "christianity" / "faiss_index-en-si-ta.bin",
         "db":    DATA_ROOT / "christianity" / "chunks-en-si-ta.db",
     },
+    "Hinduism": {
+        "dir":   DATA_ROOT / "hinduism",
+        "faiss": DATA_ROOT / "hinduism" / "faiss_index.bin",
+        "db":    DATA_ROOT / "hinduism" / "chunks.db",
+    },
 }
 
 MODEL_DIR = DATA_ROOT / "buddhism" / "onnx-model"   # shared model cache
@@ -161,8 +166,14 @@ def _load_religion(religion: str) -> None:
     con.row_factory = sqlite3.Row
 
     rel_ids: dict[str, list] = {}
-    for row in con.execute("SELECT id, religion FROM chunks"):
-        rel_ids.setdefault(row["religion"], []).append(row["id"])
+    col_names = {row[1] for row in con.execute("PRAGMA table_info(chunks)").fetchall()}
+    if "religion" in col_names:
+        for row in con.execute("SELECT id, religion FROM chunks"):
+            rel_ids.setdefault(row["religion"], []).append(row["id"])
+    else:
+        # Hinduism DB may not have a religion column — treat all rows as this religion
+        for row in con.execute("SELECT id FROM chunks"):
+            rel_ids.setdefault(religion, []).append(row["id"])
     print(f"  {religion}: religions indexed = {list(rel_ids.keys())}")
 
     _indexes[religion]      = idx
@@ -215,46 +226,81 @@ def _fetch_chunks(religion: str, ids: list) -> dict:
     con          = _cons[religion]
     placeholders = ",".join("?" * len(ids))
 
-    # Detect available columns — Buddhism has 'pitaka', Christianity has 'testament'/'genre'
-    col_names   = {row[1] for row in con.execute("PRAGMA table_info(chunks)").fetchall()}
-    pitaka_expr = "pitaka" if "pitaka" in col_names else "COALESCE(testament, '') AS pitaka"
+    # Detect available columns dynamically — each religion's DB schema differs:
+    #   Buddhism:     pitaka, book, source, religion, language
+    #   Christianity: testament, book, source, religion, language
+    #   Hinduism:     may use 'title'/'scripture' for book, 'section' for pitaka,
+    #                 and may omit language/source/religion columns entirely
+    col_names = {row[1] for row in con.execute("PRAGMA table_info(chunks)").fetchall()}
+
+    # ── pitaka / section column ──────────────────────────────────
+    if "pitaka" in col_names:
+        pitaka_expr = "pitaka"
+    elif "testament" in col_names:
+        pitaka_expr = "COALESCE(testament, '') AS pitaka"
+    elif "section" in col_names:
+        pitaka_expr = "COALESCE(section, '') AS pitaka"
+    else:
+        pitaka_expr = "'' AS pitaka"
+
+    # ── book / title column ──────────────────────────────────────
+    if "book" in col_names:
+        book_expr = "book"
+    elif "title" in col_names:
+        book_expr = "title AS book"
+    elif "scripture" in col_names:
+        book_expr = "scripture AS book"
+    else:
+        book_expr = "'' AS book"
+
+    # ── source column ────────────────────────────────────────────
+    source_expr = "source" if "source" in col_names else "'' AS source"
+
+    # ── religion column ──────────────────────────────────────────
+    religion_expr = "religion" if "religion" in col_names else f"'{religion}' AS religion"
+
+    # ── language column ──────────────────────────────────────────
+    lang_expr = "language" if "language" in col_names else "'en' AS language"
 
     rows = con.execute(
-        f"SELECT id, text, book, {pitaka_expr}, source, religion, language "
+        f"SELECT id, text, {book_expr}, {pitaka_expr}, {source_expr}, "
+        f"{religion_expr}, {lang_expr} "
         f"FROM chunks WHERE id IN ({placeholders})",
         ids,
     ).fetchall()
-    return {row["id"]: row for row in rows}
+    return {row["id"]: dict(row) for row in rows}
 
 
 # ────────────────────────────────────────────────────────────────
-# Language normalisation
+# Language-match helper
 # ────────────────────────────────────────────────────────────────
-TOP_K                = 10
-SIMILARITY_THRESHOLD = 0.30
-
 _LANG_ALIASES = {
-    "en": ["en", "english"],
-    "si": ["si", "sinhala"],
-    "ta": ["ta", "tamil"],
+    "en":      ["en", "english"],
+    "si":      ["si", "sinhala", "sin"],
+    "ta":      ["ta", "tamil", "tam"],
+    "english": ["en", "english"],
+    "sinhala": ["si", "sinhala", "sin"],
+    "tamil":   ["ta", "tamil", "tam"],
 }
 
+TOP_K     = 5
+THRESHOLD = 0.25
+
+
 def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
-    c       = chunk_lang.lower().strip()
-    r       = requested_lang.lower().strip()
-    aliases = _LANG_ALIASES.get(r, [r])
-    return c in aliases or r in _LANG_ALIASES.get(c, [c])
+    aliases = _LANG_ALIASES.get(requested_lang.lower(), [requested_lang.lower()])
+    return chunk_lang.lower() in aliases
 
 
 # ────────────────────────────────────────────────────────────────
-# Core search (English path — used for Buddhism EN and all Christianity)
+# Main search — used for English path and Hinduism (English-only)
 # ────────────────────────────────────────────────────────────────
 def search(
     query:     str,
     religion:  str   = "Buddhism",
-    top_k:     int   = TOP_K,
-    threshold: float = SIMILARITY_THRESHOLD,
     language:  str   = "en",
+    top_k:     int   = TOP_K,
+    threshold: float = THRESHOLD,
 ) -> list[dict]:
     _lazy_load(religion)
 

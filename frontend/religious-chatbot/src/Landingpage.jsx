@@ -77,7 +77,7 @@ export const RELIGIONS = {
     description: "Explore the eternal wisdom of the Vedas, Upanishads, and Bhagavad Gita.",
     placeholder: "Ask about dharma, karma, yoga, or Hindu philosophy…",
     loadingMsg:  "Preparing sacred texts from the Vedic scriptures…",
-    comingSoon:  true,
+
   },
   Islam: {
     label:       "Islam",
