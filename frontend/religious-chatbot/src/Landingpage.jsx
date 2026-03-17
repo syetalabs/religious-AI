@@ -358,34 +358,34 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
   useEffect(() => {
     let cancelled = false;
 
-    const resolve = (data) => {
+    const resolveStatus = (data) => {
       if (data.status === "ready") {
-        setPhase("done");
-        setStatusMsg("Ready!");
-        setTimeout(() => { if (!cancelled) onReady(); }, 600);
+        setPhase("indexing");
+        setTimeout(() => {
+          if (!cancelled) {
+            setPhase("done");
+            setStatusMsg("Ready!");
+            setTimeout(() => { if (!cancelled) onReady(); }, 600);
+          }
+        }, 400);
         return true;
       }
       if (data.status === "error") {
         setPhase("error");
-        setStatusMsg(data.load_error || "An error occurred while loading data.");
-        onError(data.load_error || "Failed to load data.");
+        setStatusMsg(data.error || "An error occurred while loading data.");
+        onError(data.error || "Failed to load data.");
         return true;
       }
       return false;
     };
 
     const poll = async () => {
-      // Try up to 5 times — resolve immediately if already ready
+      // Step 1 — check server is alive
       let serverReachable = false;
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
           const probe = await fetch(`${API_BASE}/health`);
-          if (probe.ok) {
-            serverReachable = true;
-            const data = await probe.json();
-            if (!cancelled && resolve(data)) return;
-            break;
-          }
+          if (probe.ok) { serverReachable = true; break; }
         } catch { /* retry */ }
         await new Promise(r => setTimeout(r, 1500));
       }
@@ -400,15 +400,23 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
       }
 
       if (cancelled) return;
+
+      // Step 2 — trigger religion data load on backend
       setPhase("downloading");
       setStatusMsg(cfg.loadingMsg);
+      try {
+        await fetch(`${API_BASE}/prepare/${religion}`, { method: "POST" });
+      } catch { /* backend will still try */ }
 
+      if (cancelled) return;
+
+      // Step 3 — poll /status/:religion until ready
       pollRef.current = setInterval(async () => {
         if (cancelled) return;
         try {
-          const res  = await fetch(`${API_BASE}/health`);
+          const res  = await fetch(`${API_BASE}/status/${religion}`);
           const data = await res.json();
-          if (resolve(data)) clearInterval(pollRef.current);
+          if (resolveStatus(data)) clearInterval(pollRef.current);
         } catch { /* network hiccup */ }
       }, POLL_INTERVAL_MS);
     };

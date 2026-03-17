@@ -208,6 +208,34 @@ def _lazy_load(religion: str = None) -> None:
                 _loaded_religions.add(r)
 
 
+def _unload_religion(religion: str) -> None:
+    """
+    Release FAISS index and SQLite connection for a religion to free RAM.
+    Buddhism is never unloaded — it is the base/default religion.
+    """
+    if religion == "Buddhism":
+        return  # never unload the default religion
+
+    with _load_lock:
+        if religion not in _loaded_religions:
+            return  # nothing to do
+
+        # Close SQLite connection
+        con = _cons.pop(religion, None)
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+        # Drop FAISS index (Python GC will free the memory)
+        _indexes.pop(religion, None)
+        _religion_ids.pop(religion, None)
+        _loaded_religions.discard(religion)
+
+        print(f"  [retrieve] Unloaded {religion} from memory")
+
+
 # ────────────────────────────────────────────────────────────────
 # Convenience accessors (used by main.py health check)
 # ────────────────────────────────────────────────────────────────

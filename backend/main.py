@@ -16,16 +16,25 @@ from data_fetcher import ensure_data_files
 _ready       = False
 _load_error  = None
 
+# Per-religion on-demand load state: "idle" | "loading" | "ready" | "error"
+_religion_status: dict = {}
+_religion_error:  dict = {}
+_religion_lock = threading.Lock()
+
 
 def _background_load():
     global _ready, _load_error
     try:
         print("=== Background: downloading data files from HuggingFace ===")
-        ensure_data_files()   # downloads Buddhism, Christianity, and Hinduism
+        ensure_data_files(["Buddhism", "Christianity"])  # Hinduism downloads on first /prepare
 
-        print("=== Background: loading FAISS indexes + embedding model ===")
+        print("=== Background: loading Buddhism index + embedding model ===")
         from retrieve import _lazy_load
-        _lazy_load()          # loads all religions
+        _lazy_load("Buddhism")   # only pre-load Buddhism; others load on demand
+
+        # Mark Buddhism as ready in per-religion state too
+        with _religion_lock:
+            _religion_status["Buddhism"] = "ready"
 
         print("=== Background load complete. API is ready. ===")
         _ready = True
@@ -73,6 +82,7 @@ class QuestionRequest(BaseModel):
 
 class FeedbackRequest(BaseModel):
     question: str = ""
+    answer:   str = ""
     rating:   str = ""
     comment:  str = ""
     religion: str = ""
@@ -133,7 +143,6 @@ def ask_question(request: QuestionRequest):
     if not _ready:
         raise HTTPException(status_code=503, detail="Server is still loading data. Please retry in a moment.")
 
-    # Validate religion
     supported = ["Buddhism", "Christianity", "Hinduism"]
     if request.religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {request.religion}. Supported: {supported}")
@@ -163,6 +172,84 @@ def ask_question(request: QuestionRequest):
     }
 
 
+# ════════════════════════════════════════════════════════════════
+# On-demand religion preparation
+# ════════════════════════════════════════════════════════════════
+def _prepare_religion_bg(religion: str):
+    """Download data + load FAISS index for a religion in a background thread."""
+    with _religion_lock:
+        if _religion_status.get(religion) in ("loading", "ready"):
+            return
+        _religion_status[religion] = "loading"
+
+    try:
+        # Unload any previously loaded non-Buddhism religion to free RAM
+        from retrieve import _unload_religion, _loaded_religions
+        for loaded in list(_loaded_religions):
+            if loaded != "Buddhism" and loaded != religion:
+                print(f"=== /prepare: unloading {loaded} to free RAM ===")
+                _unload_religion(loaded)
+                with _religion_lock:
+                    _religion_status.pop(loaded, None)
+
+        print(f"=== /prepare: downloading {religion} data ===")
+        ensure_data_files([religion])
+
+        print(f"=== /prepare: loading {religion} index ===")
+        from retrieve import _lazy_load
+        _lazy_load(religion)
+
+        with _religion_lock:
+            _religion_status[religion] = "ready"
+        print(f"=== /prepare: {religion} ready ===")
+
+    except Exception as e:
+        with _religion_lock:
+            _religion_status[religion] = "error"
+            _religion_error[religion]  = str(e)
+        print(f"=== /prepare: {religion} FAILED: {e} ===")
+
+
+@app.post("/prepare/{religion}")
+def prepare_religion(religion: str):
+    """Trigger background download + index load for a religion."""
+    supported = ["Buddhism", "Christianity", "Hinduism"]
+    if religion not in supported:
+        raise HTTPException(status_code=400, detail=f"Unsupported religion: {religion}")
+
+    if _religion_status.get(religion) == "ready":
+        return {"status": "ready"}
+
+    if _religion_status.get(religion) != "loading":
+        t = threading.Thread(target=_prepare_religion_bg, args=(religion,), daemon=True)
+        t.start()
+
+    return {"status": "loading"}
+
+
+@app.get("/status/{religion}")
+def religion_status(religion: str):
+    """Poll the load status of a specific religion."""
+    supported = ["Buddhism", "Christianity", "Hinduism"]
+    if religion not in supported:
+        raise HTTPException(status_code=400, detail=f"Unsupported religion: {religion}")
+
+    status = _religion_status.get(religion, "idle")
+
+    if status == "error":
+        return {"status": "error", "error": _religion_error.get(religion, "Unknown error")}
+    if status == "ready":
+        return {"status": "ready"}
+    # idle means /prepare hasn't been called yet — trigger it now as fallback
+    if status == "idle":
+        t = threading.Thread(target=_prepare_religion_bg, args=(religion,), daemon=True)
+        t.start()
+    return {"status": "loading"}
+
+
+# ════════════════════════════════════════════════════════════════
+# Feedback
+# ════════════════════════════════════════════════════════════════
 @app.post("/feedback")
 async def submit_feedback(payload: FeedbackRequest):
     notion_token = os.environ.get("NOTION_TOKEN", "")
@@ -183,6 +270,7 @@ async def submit_feedback(payload: FeedbackRequest):
                 "parent": {"database_id": notion_db_id},
                 "properties": {
                     "Question": {"title":     [{"text": {"content": payload.question[:2000]}}]},
+                    "Answer":   {"rich_text": [{"text": {"content": payload.answer[:2000]}}]},
                     "Rating":   {"select":    {"name": payload.rating}},
                     "Comment":  {"rich_text": [{"text": {"content": payload.comment[:2000]}}]},
                     "Religion": {"rich_text": [{"text": {"content": payload.religion}}]},
