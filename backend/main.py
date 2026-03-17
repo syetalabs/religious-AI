@@ -39,8 +39,10 @@ def _background_load():
         print("=== Background load complete. API is ready. ===")
         _ready = True
     except Exception as e:
+        import traceback
         _load_error = str(e)
         print(f"=== Background load FAILED: {e} ===")
+        traceback.print_exc()
 
 
 @asynccontextmanager

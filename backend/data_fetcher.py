@@ -69,10 +69,11 @@ def ensure_data_files(religions=None) -> None:
     if religions is None:
         religions = list(_FILES.keys())
     for religion in religions:
-        _purge_stale(religion)
-        dest_dir = DATA_ROOT / religion
+        key = religion.lower()   # normalise "Buddhism" → "buddhism"
+        _purge_stale(key)
+        dest_dir = DATA_ROOT / key
         dest_dir.mkdir(parents=True, exist_ok=True)
-        for repo_path, local_name, optional in _FILES[religion]:
+        for repo_path, local_name, optional in _FILES[key]:
             _download_file(repo_path, dest_dir / local_name, optional=optional)
     print("  [data_fetcher] All data files ready.")
 

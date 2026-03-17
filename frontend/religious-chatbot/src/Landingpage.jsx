@@ -349,6 +349,8 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
   const [statusMsg, setStatusMsg] = useState("Connecting to server…");
   const [phase, setPhase]         = useState("connecting");
   const pollRef                   = useRef(null);
+  const startTimeRef              = useRef(Date.now());
+  const MIN_DISPLAY_MS            = 3500;
 
   useEffect(() => {
     const id = setInterval(() => setDots(d => (d + 1) % 4), 500);
@@ -363,13 +365,16 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
         // Clear interval immediately so we never call onReady() twice
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         setPhase("indexing");
+        // Wait for remaining min display time before transitioning
+        const elapsed   = Date.now() - startTimeRef.current;
+        const remaining = Math.max(1000, MIN_DISPLAY_MS - elapsed);
         setTimeout(() => {
           if (!cancelled) {
             setPhase("done");
             setStatusMsg("Ready!");
-            setTimeout(() => { if (!cancelled) onReady(); }, 600);
+            setTimeout(() => { if (!cancelled) onReady(); }, 700);
           }
-        }, 400);
+        }, remaining);
         return true;
       }
       if (data.status === "error") {
