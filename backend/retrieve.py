@@ -3,6 +3,8 @@ import threading
 import numpy as np
 import faiss
 from pathlib import Path
+import gc
+import ctypes
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -209,18 +211,13 @@ def _lazy_load(religion: str = None) -> None:
 
 
 def _unload_religion(religion: str) -> None:
-    """
-    Release FAISS index and SQLite connection for a religion to free RAM.
-    Buddhism is never unloaded — it is the base/default religion.
-    """
     if religion == "Buddhism":
-        return  # never unload the default religion
+        return
 
     with _load_lock:
         if religion not in _loaded_religions:
-            return  # nothing to do
+            return
 
-        # Close SQLite connection
         con = _cons.pop(religion, None)
         if con is not None:
             try:
@@ -228,13 +225,18 @@ def _unload_religion(religion: str) -> None:
             except Exception:
                 pass
 
-        # Drop FAISS index (Python GC will free the memory)
         _indexes.pop(religion, None)
         _religion_ids.pop(religion, None)
         _loaded_religions.discard(religion)
 
-        print(f"  [retrieve] Unloaded {religion} from memory")
+        # Force GC to run FAISS C++ destructors, then trim OS pages
+        gc.collect()
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
 
+        print(f"  [retrieve] Unloaded {religion} from memory")
 
 # ────────────────────────────────────────────────────────────────
 # Convenience accessors (used by main.py health check)
