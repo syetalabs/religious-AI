@@ -360,6 +360,8 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
 
     const resolveStatus = (data) => {
       if (data.status === "ready") {
+        // Clear interval immediately so we never call onReady() twice
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         setPhase("indexing");
         setTimeout(() => {
           if (!cancelled) {
@@ -371,6 +373,7 @@ const LoadingScreen = ({ religion, onReady, onError }) => {
         return true;
       }
       if (data.status === "error") {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         setPhase("error");
         setStatusMsg(data.error || "An error occurred while loading data.");
         onError(data.error || "Failed to load data.");
