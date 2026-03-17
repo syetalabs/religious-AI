@@ -85,14 +85,15 @@ const ErrorToast = ({ message, onClose }) => (
 
 // ─── Feedback Modal ───────────────────────────────────────────
 const RATINGS = [
-  { value: "⭐ Poor",  label: "Poor",  emoji: "😞" },
-  { value: "⭐⭐ Ok",   label: "Ok",    emoji: "😐" },
+  { value: "⭐ Poor",   label: "Poor",  emoji: "😞" },
+  { value: "⭐⭐ Ok",    label: "Ok",    emoji: "😐" },
   { value: "⭐⭐⭐ Good", label: "Good", emoji: "😊" },
 ];
 
-const FeedbackModal = ({ onClose, prefillQuestion, religion, language, palette }) => {
+const FeedbackModal = ({ onClose, prefillQuestion, prefillAnswer, religion, language, palette }) => {
   const [rating,   setRating]   = useState("");
   const [comment,  setComment]  = useState("");
+  const [answer,   setAnswer]   = useState(prefillAnswer  || "");
   const [question, setQuestion] = useState(prefillQuestion || "");
   const [status,   setStatus]   = useState("idle"); // idle | loading | success | error
 
@@ -103,7 +104,7 @@ const FeedbackModal = ({ onClose, prefillQuestion, religion, language, palette }
       const res = await fetch(`${API_BASE}/feedback`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ question, rating, comment, religion, language }),
+        body:    JSON.stringify({ question, answer, rating, comment, religion, language }),
       });
       if (!res.ok) throw new Error();
       setStatus("success");
@@ -124,7 +125,9 @@ const FeedbackModal = ({ onClose, prefillQuestion, religion, language, palette }
         background: palette.headerBg, borderRadius: 20,
         border: `1px solid ${palette.border}`,
         boxShadow: "0 20px 60px #0003",
-        width: "100%", maxWidth: 440, padding: "28px 28px 24px",
+        width: "100%", maxWidth: 440,
+        maxHeight: "90vh", overflowY: "auto",
+        padding: "28px 28px 24px",
         fontFamily: "'Lora', serif",
         animation: "fadeUp 0.25s ease forwards",
       }}>
@@ -162,6 +165,25 @@ const FeedbackModal = ({ onClose, prefillQuestion, religion, language, palette }
                 value={question}
                 onChange={e => setQuestion(e.target.value)}
                 rows={2}
+                style={{
+                  width: "100%", background: palette.inputBg,
+                  border: `1px solid ${palette.border}`, borderRadius: 10,
+                  padding: "9px 12px", fontSize: 13, color: palette.text,
+                  fontFamily: "'Lora', serif", resize: "none", outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Answer field */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 11.5, color: palette.textMuted, display: "block", marginBottom: 6, letterSpacing: 0.3 }}>
+                ANSWER
+              </label>
+              <textarea
+                value={answer}
+                onChange={e => setAnswer(e.target.value)}
+                rows={3}
                 style={{
                   width: "100%", background: palette.inputBg,
                   border: `1px solid ${palette.border}`, borderRadius: 10,
@@ -257,7 +279,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
   const [isTyping, setIsTyping]                 = useState(false);
   const [error, setError]                       = useState(null);
   const [isConnected, setIsConnected]           = useState(null);
-  const [feedbackModal, setFeedbackModal]       = useState(null); // null | { question }
+  const [feedbackModal, setFeedbackModal]       = useState(null); // null | { question, answer }
 
   const messagesEndRef = useRef(null);
   const inputRef       = useRef(null);
@@ -496,7 +518,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
           </button>
 
           {/* Feedback button */}
-          <button className="icon-btn" onClick={() => setFeedbackModal({ question: "" })} style={{
+          <button className="icon-btn" onClick={() => setFeedbackModal({ question: "", answer: "" })} style={{
             padding: "7px 14px", border: `1.5px solid ${cfg.border}`,
             borderRadius: 20, background: "transparent",
             fontFamily: "'Lora', serif", fontSize: 12.5,
@@ -531,7 +553,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
           )}
 
           <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 18 }}>
-            {messages.map(msg => (
+            {messages.map((msg, idx) => (
               <div key={msg.id} className="msg-anim" style={{
                 display: "flex",
                 flexDirection: msg.role === "user" ? "row-reverse" : "row",
@@ -557,7 +579,14 @@ export default function Chatbot({ religion, onSwitchReligion }) {
                   {msg.role === "bot" && msg.warning && <ConfidenceWarning />}
                   {msg.role === "bot" && (
                     <button
-                      onClick={() => setFeedbackModal({ question: messages.find(m => m.id === msg.id - 1)?.text || "" })}
+                      onClick={() => {
+                        // find the user message that came just before this bot message
+                        const prevUserMsg = messages.slice(0, idx).reverse().find(m => m.role === "user");
+                        setFeedbackModal({
+                          question: prevUserMsg?.text || "",
+                          answer:   msg.text || "",
+                        });
+                      }}
                       title="Report an issue"
                       style={{
                         marginTop: 6, background: "none", border: "none",
@@ -651,6 +680,7 @@ export default function Chatbot({ religion, onSwitchReligion }) {
         <FeedbackModal
           onClose={() => setFeedbackModal(null)}
           prefillQuestion={feedbackModal.question}
+          prefillAnswer={feedbackModal.answer}
           religion={religion}
           language={language}
           palette={cfg}
