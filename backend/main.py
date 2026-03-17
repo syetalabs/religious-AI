@@ -13,8 +13,8 @@ from pydantic import BaseModel
 
 from data_fetcher import ensure_data_files
 
-_ready       = False
-_load_error  = None
+_ready      = False
+_load_error = None
 
 # Per-religion on-demand load state: "idle" | "loading" | "ready" | "error"
 _religion_status: dict = {}
@@ -25,12 +25,12 @@ _religion_lock = threading.Lock()
 def _background_load():
     global _ready, _load_error
     try:
-        print("=== Background: downloading data files from HuggingFace ===")
+        print("=== Background: downloading Buddhism + Christianity data from HuggingFace ===")
         ensure_data_files(["Buddhism", "Christianity"])
 
         print("=== Background: loading Buddhism index + embedding model ===")
         from retrieve import _lazy_load
-        _lazy_load("Buddhism")   # only pre-load Buddhism
+        _lazy_load("Buddhism")
 
         with _religion_lock:
             _religion_status["Buddhism"] = "ready"
@@ -78,7 +78,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     religion: str = "Buddhism"   # "Buddhism" | "Christianity" | "Hinduism"
-    language: str = "en"         # "en" only for Hinduism; "en"|"si"|"ta" for Buddhism/Christianity
+    language: str = "en"         # "en"|"si"|"ta"  (Hinduism: "en" only)
 
 
 class FeedbackRequest(BaseModel):
@@ -155,8 +155,8 @@ def ask_question(request: QuestionRequest):
 
     from retrieve import _lazy_load
     from rag_answer import answer_question
-    
-    # This call is now safe; if it hits 512MB bounds, _lazy_load will evict first
+
+    # _lazy_load evicts any currently-loaded religion before loading the new one
     _lazy_load(request.religion)
 
     result = answer_question(
@@ -179,15 +179,16 @@ def ask_question(request: QuestionRequest):
 # On-demand religion preparation
 # ════════════════════════════════════════════════════════════════
 def _prepare_religion_bg(religion: str):
-    """Download data + load FAISS index for a religion in a background thread."""
+    """
+    Download data files + load FAISS index for a religion in a background thread.
+    Eviction of any previously loaded religion is handled inside _lazy_load automatically.
+    """
     with _religion_lock:
         if _religion_status.get(religion) in ("loading", "ready"):
             return
         _religion_status[religion] = "loading"
 
     try:
-        # CHANGED: Removed the messy unloading loop from here. 
-        # _lazy_load in retrieve.py handles it flawlessly now.
         print(f"=== /prepare: downloading {religion} data ===")
         ensure_data_files([religion])
 
@@ -241,61 +242,73 @@ def religion_status(religion: str):
         t.start()
     return {"status": "loading"}
 
+
 # ════════════════════════════════════════════════════════════════
-# Memory
+# Memory debug — hit /memory before/after switching religions
+# to verify unloading + RSS drop
 # ════════════════════════════════════════════════════════════════
 @app.get("/memory")
 def memory_stats():
     import gc
-    import psutil, os
+    import psutil
     from retrieve import _indexes, _loaded_religions, _cons
 
     proc = psutil.Process(os.getpid())
     mem  = proc.memory_info()
 
     return {
-        "rss_mb":           round(mem.rss   / 1_048_576, 1),  # actual RAM used (what Render sees)
-        "vms_mb":           round(mem.vms   / 1_048_576, 1),  # virtual memory
+        "rss_mb":           round(mem.rss / 1_048_576, 1),   # actual RAM (what Render sees)
+        "vms_mb":           round(mem.vms / 1_048_576, 1),   # virtual memory
         "loaded_religions": list(_loaded_religions),
         "indexes_loaded":   {r: idx.ntotal for r, idx in _indexes.items()},
         "db_connections":   list(_cons.keys()),
-        "gc_counts":        gc.get_count(),   # (gen0, gen1, gen2) unreachable objects
+        "gc_counts":        gc.get_count(),                   # (gen0, gen1, gen2)
     }
+
 
 # ════════════════════════════════════════════════════════════════
 # Feedback
 # ════════════════════════════════════════════════════════════════
 @app.post("/feedback")
 async def submit_feedback(payload: FeedbackRequest):
-    notion_token = os.environ.get("NOTION_TOKEN", "")
-    notion_db_id = os.environ.get("NOTION_DB_ID", "")
+    notion_token = os.environ.get("NOTION_TOKEN", "").strip()
+    notion_db_id = os.environ.get("NOTION_DB_ID", "").strip()
 
     if not notion_token or not notion_db_id:
         raise HTTPException(status_code=503, detail="Feedback not configured")
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.notion.com/v1/pages",
-            headers={
-                "Authorization":  f"Bearer {notion_token}",
-                "Notion-Version": "2022-06-28",
-                "Content-Type":   "application/json",
-            },
-            json={
-                "parent": {"database_id": notion_db_id},
-                "properties": {
-                    "Question": {"title":     [{"text": {"content": payload.question[:2000]}}]},
-                    "Answer":   {"rich_text": [{"text": {"content": payload.answer[:2000]}}]},
-                    "Rating":   {"select":    {"name": payload.rating}},
-                    "Comment":  {"rich_text": [{"text": {"content": payload.comment[:2000]}}]},
-                    "Religion": {"rich_text": [{"text": {"content": payload.religion}}]},
-                    "Language": {"rich_text": [{"text": {"content": payload.language}}]},
+    # Notion rejects select with an empty name — only include Rating if set
+    properties = {
+        "Question": {"title":     [{"text": {"content": payload.question[:2000]}}]},
+        "Answer":   {"rich_text": [{"text": {"content": payload.answer[:2000]}}]},
+        "Comment":  {"rich_text": [{"text": {"content": payload.comment[:2000]}}]},
+        "Religion": {"rich_text": [{"text": {"content": payload.religion}}]},
+        "Language": {"rich_text": [{"text": {"content": payload.language}}]},
+    }
+    if payload.rating:
+        properties["Rating"] = {"select": {"name": payload.rating}}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://api.notion.com/v1/pages",
+                headers={
+                    "Authorization":  f"Bearer {notion_token}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type":   "application/json",
                 },
-            },
-            timeout=10,
-        )
+                json={
+                    "parent":     {"database_id": notion_db_id},
+                    "properties": properties,
+                },
+                timeout=8.0,   # stay under Render's gateway timeout
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Notion request timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Notion: {exc}")
 
     if resp.status_code not in (200, 201):
-        raise HTTPException(status_code=502, detail=f"Notion error: {resp.text}")
+        raise HTTPException(status_code=502, detail=f"Notion error {resp.status_code}: {resp.text[:500]}")
 
     return {"ok": True}

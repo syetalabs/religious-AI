@@ -2,8 +2,9 @@ import sqlite3
 import threading
 import numpy as np
 import faiss
+import gc
+import ctypes
 from pathlib import Path
-import gc  # Added for strict memory management
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -43,7 +44,7 @@ _religion_ids = {}   # religion -> {religion_name: [chunk_id, ...]}
 _tokenizer   = None
 _ort_session = None
 
-# CHANGED: RLock allows a thread to acquire the lock multiple times without freezing
+# RLock allows _unload_religion (called inside _lazy_load's lock) to re-enter
 _load_lock = threading.RLock()
 _loaded_religions: set = set()
 
@@ -183,16 +184,14 @@ def _load_religion(religion: str) -> None:
 
 
 # ────────────────────────────────────────────────────────────────
-# Unload a religion to free RAM (Render 512MB limits)
+# Unload a religion — frees FAISS C++ heap + SQLite connection
 # ────────────────────────────────────────────────────────────────
 def _unload_religion(religion: str) -> None:
     """
     Release FAISS index and SQLite connection for a religion to free RAM.
-    Buddhism is never unloaded — it is the base/default religion.
+    Calls gc.collect() + malloc_trim(0) to actually return pages to the OS —
+    critical on Render free tier where RSS must drop before the next load.
     """
-    if religion == "Buddhism":
-        return
-
     with _load_lock:
         if religion not in _loaded_religions:
             return
@@ -204,58 +203,53 @@ def _unload_religion(religion: str) -> None:
             except Exception:
                 pass
 
-        # CHANGED: Explicitly delete the FAISS object and force garbage collection
         idx = _indexes.pop(religion, None)
-        del idx  
-        
+        del idx  # trigger FAISS C++ destructor
+
         _religion_ids.pop(religion, None)
         _loaded_religions.discard(religion)
 
+        # Force Python GC to run FAISS C++ destructors now
         gc.collect()
+
+        # Return freed pages to the OS (glibc holds them otherwise — RSS stays high)
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
 
         print(f"  [retrieve] Unloaded {religion} from memory")
 
 
 # ────────────────────────────────────────────────────────────────
-# Lazy loader — load one or all religions
+# Lazy loader — strictly one religion in memory at a time
 # ────────────────────────────────────────────────────────────────
-def _lazy_load(religion: str = None) -> None:
+def _lazy_load(religion: str = "Buddhism") -> None:
     """
-    Load the embedding model and the specified religion's index/DB.
-    Enforces memory limits automatically by evicting inactive indices.
+    Load the embedding model and exactly ONE religion's index/DB.
+    Any other loaded religion is evicted first to stay within 512 MB.
+    Uses RLock so _unload_religion (called inside) can re-enter safely.
     """
-    religions_to_load = (
-        list(_RELIGION_PATHS.keys()) if religion is None
-        else [religion]
-    )
-
-    if _ort_session is not None and all(r in _loaded_religions for r in religions_to_load):
+    # Fast path — already loaded, nothing to do
+    if _ort_session is not None and religion in _loaded_religions:
         return
 
     with _load_lock:
+        # Re-check inside lock — another thread may have loaded it already
+        if _ort_session is not None and religion in _loaded_religions:
+            return
+
         _load_embedding_model()
 
-        # CHANGED: Eviction logic is now securely embedded in the loader
-        for r in religions_to_load:
-            if r != "Buddhism" and r not in _loaded_religions:
-                # Unload any other loaded religion to make room
-                for loaded in list(_loaded_religions):
-                    if loaded != "Buddhism" and loaded != r:
-                        print(f"  [retrieve] Evicting {loaded} to make room for {r}")
-                        _unload_religion(loaded)
+        if religion not in _loaded_religions:
+            # Evict every other loaded religion before loading the new one
+            for loaded in list(_loaded_religions):
+                if loaded != religion:
+                    print(f"  [retrieve] Evicting {loaded} to make room for {religion}")
+                    _unload_religion(loaded)
 
-        for r in religions_to_load:
-            if r not in _loaded_religions:
-                _load_religion(r)
-                _loaded_religions.add(r)
-
-
-# ────────────────────────────────────────────────────────────────
-# Convenience accessors (used by main.py health check)
-# ────────────────────────────────────────────────────────────────
-@property
-def index():
-    return _indexes.get("Buddhism")
+            _load_religion(religion)
+            _loaded_religions.add(religion)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -267,6 +261,7 @@ def _fetch_chunks(religion: str, ids: list) -> dict:
     con          = _cons[religion]
     placeholders = ",".join("?" * len(ids))
 
+    # Detect available columns dynamically — each religion's DB schema differs
     col_names = {row[1] for row in con.execute("PRAGMA table_info(chunks)").fetchall()}
 
     if "pitaka" in col_names:
@@ -287,9 +282,9 @@ def _fetch_chunks(religion: str, ids: list) -> dict:
     else:
         book_expr = "'' AS book"
 
-    source_expr = "source" if "source" in col_names else "'' AS source"
+    source_expr   = "source"   if "source"   in col_names else "'' AS source"
     religion_expr = "religion" if "religion" in col_names else f"'{religion}' AS religion"
-    lang_expr = "language" if "language" in col_names else "'en' AS language"
+    lang_expr     = "language" if "language" in col_names else "'en' AS language"
 
     rows = con.execute(
         f"SELECT id, text, {book_expr}, {pitaka_expr}, {source_expr}, "
@@ -322,7 +317,7 @@ def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
 
 
 # ────────────────────────────────────────────────────────────────
-# Main search
+# Main search — English path + Hinduism
 # ────────────────────────────────────────────────────────────────
 def search(
     query:     str,
@@ -337,8 +332,7 @@ def search(
     if idx is None:
         return []
 
-    rel_name = religion
-    allowed_ids = set(_religion_ids[religion].get(rel_name, []))
+    allowed_ids = set(_religion_ids[religion].get(religion, []))
 
     query_vec = _encode(query)
     faiss.normalize_L2(query_vec)
@@ -387,6 +381,11 @@ def search_sinhala_direct(
     top_k:     int   = TOP_K,
     threshold: float = 0.20,
 ) -> list[dict]:
+    """
+    Find Sinhala scripture chunks relevant to an English query.
+    Uses FAISS with the English query, then filters for language='si'.
+    Only applicable to Buddhism — returns [] for other religions.
+    """
     if religion != "Buddhism":
         return []
 
@@ -399,6 +398,7 @@ def search_sinhala_direct(
     query_vec = _encode(en_query)
     faiss.normalize_L2(query_vec)
 
+    # Scan much deeper — English chunks dominate top results
     fetch_k = min(top_k * 60, idx.ntotal)
     scores, indices = idx.search(query_vec, fetch_k)
     scores  = scores[0]
@@ -447,10 +447,15 @@ MIN_CHUNKS_FOR_NATIVE = 2
 
 def search_christianity_native_lang(
     en_query:  str,
-    language:  str,
+    language:  str,          # "si" or "ta"
     top_k:     int   = TOP_K,
     threshold: float = 0.20,
 ) -> list[dict]:
+    """
+    Search chunks-en-si-ta.db for Sinhala or Tamil Christianity chunks.
+    Uses the unified Christianity FAISS index with an English query,
+    then filters by language in the DB.
+    """
     _lazy_load("Christianity")
 
     idx = _indexes.get("Christianity")
@@ -497,8 +502,8 @@ def search_christianity_native_lang(
         print(f"  [native-search] DB query error: {exc}")
         return []
 
-    results  = []
-    seen     = set()
+    results = []
+    seen    = set()
     for row in rows:
         text_hash = hash(row["text"][:200])
         if text_hash in seen:
