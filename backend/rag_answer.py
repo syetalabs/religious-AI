@@ -2087,6 +2087,26 @@ def answer_question(
         en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [ta] EN query: {en_query!r}")
 
+        # Re-moderate the translated English query to catch unsafe content
+        # that was obscured by Tamil script in the original question.
+        is_safe_en, reason_en = moderate_input(en_query, religion=religion)
+        if not is_safe_en:
+            fb = _FALLBACK_MESSAGES.get("ta", _FALLBACK_MESSAGES["en"])
+            return {
+                "answer":         fb.get(reason_en, "This question cannot be answered."),
+                "sources":        [],
+                "scores":         [],
+                "flagged":        True,
+                "low_confidence": False,
+                "warnings":       [reason_en],
+            }
+
+        # Hinduism: no native Tamil chunks in DB yet — go straight to
+        # English retrieval + translate path.
+        if religion == "Hinduism":
+            print("  [ta] Hinduism — using English context + translation")
+            return _english_context_then_translate(question, en_query, religion, target_lang="ta")
+
         # For Christianity: first try native Tamil chunks from chunks-en-si-ta.db
         if religion == "Christianity":
             from retrieve import search_christianity_native_lang
@@ -2126,6 +2146,26 @@ def answer_question(
         en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [si] Original question: {question[:80]!r}")
         print(f"  [si] Translated EN query: {en_query!r}")
+
+        # Re-moderate the translated English query to catch unsafe content
+        # that was obscured by Sinhala script in the original question.
+        is_safe_en, reason_en = moderate_input(en_query, religion=religion)
+        if not is_safe_en:
+            fb = _FALLBACK_MESSAGES.get("si", _FALLBACK_MESSAGES["en"])
+            return {
+                "answer":         fb.get(reason_en, "This question cannot be answered."),
+                "sources":        [],
+                "scores":         [],
+                "flagged":        True,
+                "low_confidence": False,
+                "warnings":       [reason_en],
+            }
+
+        # Hinduism: no native Sinhala chunks in DB yet — go straight to
+        # English retrieval + translate path.
+        if religion == "Hinduism":
+            print("  [si] Hinduism — using English context + translation")
+            return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
         # Christianity: first try native Sinhala chunks from chunks-en-si-ta.db,
         # then fall back to the English-context + translate path.
