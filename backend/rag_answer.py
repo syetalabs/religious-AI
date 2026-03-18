@@ -442,7 +442,7 @@ _VERSE_REF_PATTERNS = {
 # Matches [Source: ...] or [மூலாශ்‍ர: ...] or [මූලාශ්‍රය: ...] tags that
 # leak from the context prompt into the LLM answer.
 _SOURCE_TAG_RE = re.compile(
-    r"\[(?:Source|මූලාශ්‍රය|மூலம்)[^\]]*\]",
+    r"\[(?:Source|මූලාශ්‍රය|මූලාශ්රය|மூலம்)[^\]]*\]",
     re.UNICODE,
 )
 
@@ -1725,6 +1725,14 @@ def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
     ref = {
         "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
         "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
+        "Hinduism": (
+            "Do NOT cite specific verse numbers (like BG 2.47). "
+            "When explaining a set of named concepts (such as the three gunas, "
+            "four purusharthas, five koshas, eight limbs of yoga, etc.), "
+            "ALWAYS name and briefly describe EVERY item in the set explicitly. "
+            "Never describe items without naming them (Sattva, Rajas, Tamas — "
+            "not just 'the calm quality', 'the active quality', etc.)."
+        ),
     }.get(religion, "Do NOT cite specific verse numbers")
     msg = (
         f"Scripture context:\n{ctx}\n\n"
@@ -1806,6 +1814,10 @@ def _review_translation(
                 "  உபநிஷதம்     → உபநிஷதம் — NOT 'வேத நூல்' alone\n"
                 "  வேதம்         → வேதம் — NOT 'புனித நூல்' alone\n\n"
                 "- பௌத்த சொற்களை (நிர்வாணம், திரிபிடகம்) இந்து பதிலில் சேர்க்க வேண்டாம்.\n"
+                "- CRITICAL — குண பெயர்கள்: மூன்று குணங்களும் பெயரிட்டு குறிப்பிடப்பட வேண்டும்:\n"
+                "    சத்வ குணம், ரஜஸ் குணம், தமஸ் குணம்.\n"
+                "  ரஜஸ் குணம் (Rajas) பெயரிடாமல் 'செயல்பாட்டு சக்தி' என குறிப்பிட்டிருந்தால்"
+                " — ரஜஸ் குணம் என பெயரிட்டு சேர்க்கவும்.\n"
                 "- கிறிஸ்தவ சொற்களை இந்து பதிலில் சேர்க்க வேண்டாம்.\n"
                 "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
             ),
@@ -1942,6 +1954,10 @@ def _review_translation(
                 "  Shiva          → ශිව දෙවිඳු\n\n"
                 "- 'ශුද්ධ ලියවිල්ල', 'ත්‍රිපිටකය', 'නිර්වාණය' — ක්‍රිස්තියානි/බෞද්ධ පද "
                 "හින්දු පිළිතුරක ඇතුළත් නොකරන්න.\n"
+                "- CRITICAL — ගුණ නාම: ගුණ තුනම නම් සහිතව දිස් විය යුතුය:\n"
+                "    සත්ත්ව ගුණය, රජස් ගුණය, තමස් ගුණය.\n"
+                "  රජස් ගුණය (Rajas) නම් නොකර 'ක්‍රියාශීලී ශක්තිය' ලෙස‍"
+                " සඳහන් කර ඇත්නම් — රජස් ගුණය යයි නම් කර එකතු කරන්න.\n"
                 "- ව්‍යාජ හෝ නොපවතින සිංහල ශබ්ද ඉංග්‍රීසි මූලාශ්‍රය බලා නිවැරදි කරන්න."
             ),
         }.get(religion, "නිවැරදි සහ ස්වාභාවික සිංහල ආගමික පාරිභාෂිතය භාවිත කරන්න.")
