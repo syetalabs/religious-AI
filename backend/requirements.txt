@@ -1,0 +1,16 @@
+requests
+beautifulsoup4
+tqdm
+fastapi
+uvicorn
+faiss-cpu
+transformers
+scikit-learn
+python-dotenv
+deep_translator
+langdetect
+numpy
+onnxruntime
+huggingface-hub
+httpx
+psutil

@@ -1,0 +1,10 @@
+/backend/__pycache__
+data/
+.env
+.env.local
+.env.production
+.env*.local
+/frontend/religious-chatbot/public/
+/frontend/religious-chatbot/node_modules/
+/frontend/religious-chatbot/eslint.config.js
+/frontend/religious-chatbot/package-lock.json
