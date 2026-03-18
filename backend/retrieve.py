@@ -310,6 +310,14 @@ _LANG_ALIASES = {
 TOP_K     = 5
 THRESHOLD = 0.25
 
+# Per-religion TOP_K overrides.
+# Hinduism has many overlapping scripture passages — a higher TOP_K ensures
+# that enumeration questions (e.g. "three gunas", "four purusharthas") retrieve
+# chunks covering all parts of the concept, not just the top-scoring passage.
+_RELIGION_TOP_K = {
+    "Hinduism": 8,
+}
+
 
 def _lang_matches(chunk_lang: str, requested_lang: str) -> bool:
     aliases = _LANG_ALIASES.get(requested_lang.lower(), [requested_lang.lower()])
@@ -331,6 +339,10 @@ def search(
     idx = _indexes.get(religion)
     if idx is None:
         return []
+
+    # Apply per-religion TOP_K override when caller uses the default
+    if top_k == TOP_K:
+        top_k = _RELIGION_TOP_K.get(religion, TOP_K)
 
     allowed_ids = set(_religion_ids[religion].get(religion, []))
 
