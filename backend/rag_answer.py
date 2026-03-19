@@ -83,7 +83,13 @@ CRITICAL — Quoting rules:
 - Do NOT cite specific verse references (e.g. Bhagavad Gita 2.47, Upanishad 1.1) unless those exact references appear word-for-word in the provided context.
 - Do NOT cite or mention any scripture name unless it appears in the [Source: ...] tags above.
 - Do NOT reproduce or paraphrase text not present in the provided context.
-- Never invent or recall verse references or text names from memory — only use what is explicitly in the context.""",
+- Never invent or recall verse references or text names from memory — only use what is explicitly in the context.
+
+HARD RULE for enumeration answers: When answering about any named set of concepts (such as the three gunas, four purusharthas, five koshas, eight limbs of yoga, etc.), ALWAYS present them as a clearly structured list naming each item explicitly before describing it. For example, for the three gunas write:
+1. Sattva — [description]
+2. Rajas — [description]
+3. Tamas — [description]
+Every item in the set must be named first, then described.""",
 
     "Buddhism": """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
@@ -453,6 +459,30 @@ def _scrub_source_tags(text: str) -> str:
     # Tidy up any double-spaces or trailing whitespace left behind
     cleaned = re.sub(r"  +", " ", cleaned)
     return cleaned.strip()
+
+
+def _scrub_scholarly_notation(text: str) -> str:
+    """
+    Remove scholarly/critical apparatus notation that leaks from wisdomlib
+    and similar academic scripture sources into the answer text.
+    Examples:
+      (v.l. abhayam [abhaya])   — variant reading notation
+      [abhaya]                  — bracketed Sanskrit gloss
+      (cf. BG 2.47)             — cross-reference
+      [Skt. moksha]             — inline Sanskrit label
+    """
+    # (v.l. ...) — variant reading
+    text = re.sub(r'\(v\.l\.?[^)]*\)', '', text)
+    # [word] — bracketed single-word Sanskrit glosses (all caps or mixed, no spaces = technical term)
+    text = re.sub(r'\[[A-Za-z]{2,20}\]', '', text)
+    # (cf. ...) or (see ...) cross references
+    text = re.sub(r'\((?:cf|see|compare)\.?[^)]{0,60}\)', '', text, flags=re.IGNORECASE)
+    # [Skt. ...] or [Pali. ...] inline labels
+    text = re.sub(r'\[(?:Skt|Pali|Sans|Skr)\.?[^\]]{0,40}\]', '', text, flags=re.IGNORECASE)
+    # Clean up double spaces left behind
+    text = re.sub(r'  +', ' ', text)
+    return text.strip()
+
 
 _OPINION_SIGNALS = [
     r"\bi (think|believe|feel|personally|would say)\b",
@@ -1518,9 +1548,46 @@ _CHRISTIAN_REPLACEMENTS = [
     ("ස්වාමියා",                    "ස්වාමීන් වහන්සේ"),
 ]
 
+
+# ── Hinduism Sinhala post-translation replacements ───────────────────────────
+# Fixes Google Translate mistranslations of common English metaphor phrases
+# that appear in Hindu scripture answers.
+_HINDU_REPLACEMENTS = [
+    # "are like" / "is like" constructions
+    ("වැනි වේ",          "වැනිය"),
+    ("වැනිය වේ",         "වැනිය"),
+    ("ලෙස පවතී",         "වැනිය"),
+    ("ආකාරයේ වේ",        "වැනිය"),
+    ("ආකාරයෙන් වේ",      "වැනිය"),
+    ("ආකාරයකි",          "වැනිය"),
+    ("ආකාරයෙකි",         "වැනිය"),
+    ("ආකාරයේය",          "වැනිය"),
+    ("වැනි ය",           "වැනිය"),
+    ("සමාන වේ",          "වැනිය"),
+    ("සමානය",            "වැනිය"),
+    # Fabric/cloth metaphor mistranslations
+    ("ජීවිතයේ රෙදිපිළි", "ජීවිතයේ ස්වභාවය"),
+    ("රෙදිපිළි සෑදෙන",   "ගොඩනැගෙන"),
+    ("රෙදිපිළි",         "ස්වභාවය"),
+    ("රෙදි",             "ස්වභාවය"),
+    ("වියන ලද",          "බැඳී ඇති"),
+    ("වියා ඇති",         "බැඳී ඇති"),
+    ("නූල් වැනිය",       "අංග වැනිය"),
+    # Unnatural "essence" translations
+    ("සාරයයි",           "ගුණාංගයයි"),
+    ("සාරය වේ",          "ගුණාංගයයි"),
+    # Garbled Google Translate artifacts
+    ("එක්තරා වැනියන්",   ""),
+    ("එක්තරා වැනියන්,",  ""),
+    ("එක්තරා වැනියන්.",  ""),
+]
+
 def _apply_respectful_titles(text: str, religion: str = "Buddhism") -> str:
     if religion == "Christianity":
         for wrong, correct in _CHRISTIAN_REPLACEMENTS:
+            text = text.replace(wrong, correct)
+    elif religion == "Hinduism":
+        for wrong, correct in _HINDU_REPLACEMENTS:
             text = text.replace(wrong, correct)
     else:
         for a, b in _BUDDHA_REPLACEMENTS:
@@ -1715,24 +1782,83 @@ def _is_topic_mismatch(en_query: str, answer: str) -> bool:
 # Sinhala answer helpers
 # ════════════════════════════════════════════════════════════════
 
+# ════════════════════════════════════════════════════════════════
+# Hindu enumeration detection
+# ════════════════════════════════════════════════════════════════
+
+_HINDU_ENUM_SETS = {
+    "three gunas":   ["Sattva", "Rajas", "Tamas"],
+    "triguna":       ["Sattva", "Rajas", "Tamas"],
+    "tri guna":      ["Sattva", "Rajas", "Tamas"],
+    "gunas":         ["Sattva", "Rajas", "Tamas"],
+    "purushartha":   ["Dharma", "Artha", "Kama", "Moksha"],
+    "four aims":     ["Dharma", "Artha", "Kama", "Moksha"],
+    "kosha":         ["Annamaya", "Pranamaya", "Manomaya", "Vijnanamaya", "Anandamaya"],
+    "five sheaths":  ["Annamaya", "Pranamaya", "Manomaya", "Vijnanamaya", "Anandamaya"],
+    "eight limbs":   ["Yama", "Niyama", "Asana", "Pranayama", "Pratyahara", "Dharana", "Dhyana", "Samadhi"],
+    "ashtanga":      ["Yama", "Niyama", "Asana", "Pranayama", "Pratyahara", "Dharana", "Dhyana", "Samadhi"],
+    "four varnas":   ["Brahmin", "Kshatriya", "Vaishya", "Shudra"],
+    "varna":         ["Brahmin", "Kshatriya", "Vaishya", "Shudra"],
+    "four ashramas": ["Brahmacharya", "Grihastha", "Vanaprastha", "Sannyasa"],
+    "ashrama":       ["Brahmacharya", "Grihastha", "Vanaprastha", "Sannyasa"],
+    "three paths":   ["Jnana Yoga", "Bhakti Yoga", "Karma Yoga"],
+    "three yogas":   ["Jnana Yoga", "Bhakti Yoga", "Karma Yoga"],
+}
+
+
+def _detect_hindu_enum(en_query: str) -> list[str] | None:
+    """Return required item names if query asks about a known Hindu set, else None."""
+    q = en_query.lower()
+    for keyword, items in _HINDU_ENUM_SETS.items():
+        if keyword in q:
+            return items
+    return None
+
+
 def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
-    """Generate an English answer from English scripture chunks."""
+    """Generate an English answer from English scripture chunks.
+
+    For Hinduism enumeration questions (three gunas, four purusharthas, etc.)
+    a fill-in-the-blank prompt is used so the LLM cannot skip naming any item.
+    """
     ctx = "\n\n---\n\n".join(
         f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
         for r in en_res
     )
+
+    # ── Hinduism enumeration: fill-in-the-blank prompt ───────────────────────
+    if religion == "Hinduism":
+        required_items = _detect_hindu_enum(en_q)
+        if required_items:
+            skeleton = "\n".join(
+                f"{i+1}. {item} —" for i, item in enumerate(required_items)
+            )
+            enum_msg = (
+                f"Scripture context:\n{ctx}\n\n"
+                f"Question: {en_q}\n\n"
+                f"Instructions:\n"
+                f"- Answer ONLY using the scripture context above.\n"
+                f"- Complete the numbered list below. Each item name is already "
+                f"written — add a clear 1-2 sentence description after the dash.\n"
+                f"- Do NOT change, skip, or reorder the item names.\n"
+                f"- Do NOT cite specific verse numbers.\n"
+                f"- After the list, add 1-2 sentences of broader context if helpful.\n\n"
+                f"Answer (complete each line):\n{skeleton}"
+            )
+            raw = _call_groq(_PERSONAS_EN[religion], enum_msg, MODEL_DEFAULT)
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+            # Safety net: if the LLM stripped the skeleton prefix, prepend it
+            if not any(item in raw for item in required_items):
+                raw = skeleton + " " + raw
+            return _trim_incomplete_sentence(raw)
+
+    # ── Standard path (Buddhism, Christianity, non-enum Hinduism) ────────────
     fmt = _format_instructions(religion, _is_list_request(en_q), "en")
     ref = {
         "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
         "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
-        "Hinduism": (
-            "Do NOT cite specific verse numbers (like BG 2.47). "
-            "When explaining a set of named concepts (such as the three gunas, "
-            "four purusharthas, five koshas, eight limbs of yoga, etc.), "
-            "ALWAYS name and briefly describe EVERY item in the set explicitly. "
-            "Never describe items without naming them (Sattva, Rajas, Tamas — "
-            "not just 'the calm quality', 'the active quality', etc.)."
-        ),
+        "Hinduism":    "Do NOT cite specific verse numbers (like BG 2.47)",
     }.get(religion, "Do NOT cite specific verse numbers")
     msg = (
         f"Scripture context:\n{ctx}\n\n"
@@ -2056,6 +2182,8 @@ def _english_context_then_translate(
     )
     translated  = _scrub_fabricated_book_cites(translated, en_context)
     translated  = _scrub_off_topic_book_tangents(translated, en_context)
+    if religion == "Hinduism":
+        translated = _scrub_scholarly_notation(translated)
     if target_lang in ("si", "ta"):
         translated = _apply_respectful_titles(translated, religion)
     translated, extra_warnings = moderate_output(translated, en_context, religion, target_lang)
@@ -2426,6 +2554,8 @@ def answer_question(
 
     final_answer, warnings = moderate_output(raw_answer, context, religion, lang)
     final_answer = _scrub_question_echo(final_answer)
+    if religion == "Hinduism":
+        final_answer = _scrub_scholarly_notation(final_answer)
 
     # Patch missing book field so sources work for DB schemas without a book column
     # (e.g. Hinduism — falls back to pitaka/section label or source)
