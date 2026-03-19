@@ -89,7 +89,9 @@ HARD RULE for enumeration answers: When answering about any named set of concept
 1. Sattva — [description]
 2. Rajas — [description]
 3. Tamas — [description]
-Every item in the set must be named first, then described.""",
+Every item in the set must be named first, then described.
+
+QUOTING RULE: Do NOT reproduce long direct quotes from the scripture context. Paraphrase the teaching in your own words instead. If you must reference specific wording, keep it to one short phrase of no more than 10 words, and only if those exact words appear in the provided context.""",
 
     "Buddhism": """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
@@ -1580,6 +1582,8 @@ _HINDU_REPLACEMENTS = [
     ("එක්තරා වැනියන්",   ""),
     ("එක්තරා වැනියන්,",  ""),
     ("එක්තරා වැනියන්.",  ""),
+    # Honorific spelling corrections
+    ("ස්වාමින් වහන්සේ",   "ස්වාමීන් වහන්සේ"),
 ]
 
 def _apply_respectful_titles(text: str, religion: str = "Buddhism") -> str:
@@ -2069,6 +2073,11 @@ def _review_translation(
                 "  Mahabharata    → මහාභාරතය\n"
                 "  Ramayana       → රාමායනය\n"
                 "  Purana         → පුරාණය\n\n"
+                "———————————————————————————————————————————————————————————————————————————————————————————————————————————————————\\n"
+                "- ස්වාමීන් වහන්සේ යනු සාමාන්ය ක්රියාවයක්. මූල් ඊංග්රීසි පාටය බලා යකු දෙවියාගෙ නම යොදන්නය්ක:\\n"
+                "    කෝලා / කෝලය ගෙ කේයුම් කරන්නේ — කෝලා චුණුවයා / කෝලා ජීවිතයේ කේයුම් කරන්නේ බලා යොදන්නය්ක.\\n"
+                "    විෂ්ණු / පුරාණ කේයුම් කරන්නේ — විෂ්ණු දෙවියාගේ යොදන්නය්ක.\\n"
+                "    ශිව කේයුම් කරන්නේ — ශිව දෙවියාගේ යොදන්නය්ක.\\n"
                 "═══ ශ්‍රේෂ්ඨ සංකල්ප ═══\n"
                 "  yoga           → යෝගය — NOT 'ව්‍යායාමය' (exercise) alone\n"
                 "  bhakti         → භක්තිය — NOT 'ප්‍රේමය' alone\n"
