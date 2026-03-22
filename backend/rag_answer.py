@@ -83,7 +83,15 @@ CRITICAL — Quoting rules:
 - Do NOT cite specific verse references (e.g. Bhagavad Gita 2.47, Upanishad 1.1) unless those exact references appear word-for-word in the provided context.
 - Do NOT cite or mention any scripture name unless it appears in the [Source: ...] tags above.
 - Do NOT reproduce or paraphrase text not present in the provided context.
-- Never invent or recall verse references or text names from memory — only use what is explicitly in the context.""",
+- Never invent or recall verse references or text names from memory — only use what is explicitly in the context.
+
+HARD RULE for enumeration answers: When answering about any named set of concepts (such as the three gunas, four purusharthas, five koshas, eight limbs of yoga, etc.), ALWAYS present them as a clearly structured list naming each item explicitly before describing it. For example, for the three gunas write:
+1. Sattva — [description]
+2. Rajas — [description]
+3. Tamas — [description]
+Every item in the set must be named first, then described.
+
+QUOTING RULE: Do NOT reproduce long direct quotes from the scripture context. Paraphrase the teaching in your own words instead. If you must reference specific wording, keep it to one short phrase of no more than 10 words, and only if those exact words appear in the provided context.""",
 
     "Buddhism": """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
@@ -442,7 +450,7 @@ _VERSE_REF_PATTERNS = {
 # Matches [Source: ...] or [மூலாශ்‍ர: ...] or [මූලාශ්‍රය: ...] tags that
 # leak from the context prompt into the LLM answer.
 _SOURCE_TAG_RE = re.compile(
-    r"\[(?:Source|මූලාශ්‍රය|மூலம்)[^\]]*\]",
+    r"\[(?:Source|මූලාශ්‍රය|මූලාශ්රය|மூலம்)[^\]]*\]",
     re.UNICODE,
 )
 
@@ -453,6 +461,30 @@ def _scrub_source_tags(text: str) -> str:
     # Tidy up any double-spaces or trailing whitespace left behind
     cleaned = re.sub(r"  +", " ", cleaned)
     return cleaned.strip()
+
+
+def _scrub_scholarly_notation(text: str) -> str:
+    """
+    Remove scholarly/critical apparatus notation that leaks from wisdomlib
+    and similar academic scripture sources into the answer text.
+    Examples:
+      (v.l. abhayam [abhaya])   — variant reading notation
+      [abhaya]                  — bracketed Sanskrit gloss
+      (cf. BG 2.47)             — cross-reference
+      [Skt. moksha]             — inline Sanskrit label
+    """
+    # (v.l. ...) — variant reading
+    text = re.sub(r'\(v\.l\.?[^)]*\)', '', text)
+    # [word] — bracketed single-word Sanskrit glosses (all caps or mixed, no spaces = technical term)
+    text = re.sub(r'\[[A-Za-z]{2,20}\]', '', text)
+    # (cf. ...) or (see ...) cross references
+    text = re.sub(r'\((?:cf|see|compare)\.?[^)]{0,60}\)', '', text, flags=re.IGNORECASE)
+    # [Skt. ...] or [Pali. ...] inline labels
+    text = re.sub(r'\[(?:Skt|Pali|Sans|Skr)\.?[^\]]{0,40}\]', '', text, flags=re.IGNORECASE)
+    # Clean up double spaces left behind
+    text = re.sub(r'  +', ' ', text)
+    return text.strip()
+
 
 _OPINION_SIGNALS = [
     r"\bi (think|believe|feel|personally|would say)\b",
@@ -607,19 +639,47 @@ def _translate_query_to_english(question: str, religion: str = "Buddhism") -> st
             "Output ONLY the English translation — no explanation, no extra text."
         ),
         "Hinduism": (
-            "You are a translator. Translate the following question into "
+            "You are a translator. Translate the following Sinhala or Tamil question into "
             "concise English suitable for a Hindu scripture search. "
             "You MUST use the correct Hindu theological English term — never a generic word.\n\n"
             "CRITICAL term mappings (use these EXACTLY):\n"
-            "  ධර්මය / தர்மம்           → dharma  (NOT duty alone)\n"
-            "  කර්මය / கர்மா            → karma\n"
-            "  මෝක්ෂය / மோட்சம்         → moksha / liberation\n"
-            "  ආත්මය / ஆத்மா            → atman / soul\n"
-            "  බ්‍රහ්මන් / பிரம்மன்     → Brahman (ultimate reality)\n"
-            "  සංසාරය / சம்சாரம்        → samsara (cycle of rebirth)\n"
-            "  ඇදහිල්ල / பக்தி         → bhakti (devotion)\n"
-            "  ඥානය / ஞானம்             → jnana (knowledge / wisdom)\n"
-            "  දෙවිඳු / கடவுள்          → God / Ishvara\n"
+            "  ධර්මය / தர்மம்              → dharma  (NOT 'duty' or 'religion' alone)\n"
+            "  කර්මය / கர்மா               → karma   (NOT 'action' alone)\n"
+            "  මෝක්ෂය / மோட்சம் / முக்தி  → moksha / liberation\n"
+            "  ආත්මය / ஆத்மா / ஆத்மன்     → atman / soul\n"
+            "  පරමාත්මය / பரமாத்மன்        → Paramatman / Supreme Soul\n"
+            "  බ්‍රහ්මන් / பிரம்மம்        → Brahman (ultimate reality, NOT Brahma the deity)\n"
+            "  සංසාරය / சம்சாரம்           → samsara (cycle of rebirth)\n"
+            "  නැවත ඉපදීම / மறுபிறவி       → reincarnation / rebirth\n"
+            "  භක්තිය / பக்தி              → bhakti (devotion)\n"
+            "  ඥානය / ஞானம்                → jnana (knowledge / wisdom)\n"
+            "  මායාව / மாயை                → maya (illusion)\n"
+            "  ත්‍රිවිධ ගුණ / முக்குணங்கள் → three gunas\n"
+            "  සත්ත්ව ගුණය / சாத்வீகம்    → sattva (guna)\n"
+            "  රජස් ගුණය / ராஜஸம்         → rajas (guna)\n"
+            "  තමස් ගුණය / தாமஸம்         → tamas (guna)\n"
+            "  යෝගය / யோகம்                → yoga\n"
+            "  නිෂ්කාම කර්මය              → nishkama karma (desireless action)\n"
+            "  අහංකාරය / அகங்காரம்         → ahamkara (ego)\n"
+            "  කෘෂ්ණ / கிருஷ்ணன்           → Krishna\n"
+            "  දෙවිඳු / கடவுள்             → God / Ishvara\n"
+            "Output ONLY the English translation — no explanation, no extra text.\n"
+            "Common Sinhala Hindu question keywords:\n"
+            "  මෝක්ෂය / මෝක්ව යනු කුමක්ද    → what is moksha / what is liberation\n"
+            "  කර්මය යනු කුමක්ද              → what is karma\n"
+            "  දහයමය යනු කුමක්ද            → what is dharma\n"
+            "  ආත්මය යනු කුමක්ද             → what is atman / the soul\n"
+            "  බ්‍රහ්මන් යනු කුමක්ද          → what is Brahman\n"
+            "  මායාව යනු කුමක්ද             → what is maya / illusion\n"
+            "  සංසාරය යනු කුමක්ද           → what is samsara\n"
+            "  ගීතාවේ ත්‍රිවිද ගුණ මෝනවාද  → what are the three gunas in the Gita\n"
+            "  ධක්තිය යනු කුමක්ද            → what is bhakti\n"
+            "  යෝගය යනු කුමක්ද              → what is yoga\n"
+            "  කෝලා දෙවියාගේ කේවුම්      → who is Krishna\n"
+            "  විෂ්ණු දෙවියාගේ කේවුම්      → who is Vishnu\n"
+            "  ශිව දෙවියාගේ කේවුම්        → who is Shiva\n"
+            "  පුනර්බවය යනු කුමක්ද         → what is reincarnation\n"
+            "  මරණය්පසු ආත්මයට සිදුවේද  → what happens to the soul after death\n"
             "Output ONLY the English translation — no explanation, no extra text."
         ),
         "Christianity": (
@@ -1134,7 +1194,9 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
     seen_text_hashes = set()
     refined          = []
     MAX_PER_BOOK     = 2
-    MAX_TOTAL        = 6
+    # Hinduism needs more total slots — enumeration questions (three gunas,
+    # four purusharthas, etc.) span multiple scripture passages.
+    MAX_TOTAL        = 8 if religion == "Hinduism" else 6
 
     def _priority(r: dict) -> int:
         if religion == "Buddhism":
@@ -1147,11 +1209,12 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
                 return 1
             return 2
         elif religion == "Hinduism":
-            # Prioritise: Upanishads > Bhagavad Gita > Puranas > other Smriti > Vedas
+            # Prioritise: Bhagavad Gita > Upanishads > Puranas > other Smriti > Vedas
+            # Gita comes first because most Hinduism questions are Gita-centric.
             section = r.get("pitaka", "").lower()
-            if "upanishad" in section:
-                return 0
             if "gita" in section or "bhagavad" in section:
+                return 0
+            if "upanishad" in section:
                 return 1
             if "purana" in section:
                 return 2
@@ -1160,7 +1223,10 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
             return 4
         return 0
 
-    for r in sorted(results, key=lambda r: (_priority(r), -r["score"])):
+    sorted_results = sorted(results, key=lambda r: (_priority(r), -r["score"]))
+
+    # ── Pass 1: fill with best candidates, capped per book ──────────
+    for r in sorted_results:
         text_hash = hash(r["text"][:200])
         if text_hash in seen_text_hashes:
             continue
@@ -1172,6 +1238,24 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
         refined.append(r)
         if len(refined) >= MAX_TOTAL:
             break
+
+    # ── Pass 2 (Hinduism only): if one source dominates all slots,
+    #    try to inject at least one chunk from a different source so
+    #    enumeration questions (three gunas, etc.) get diverse context.
+    if religion == "Hinduism" and len(refined) >= 2:
+        unique_books = {r["book"] for r in refined if r.get("book")}
+        if len(unique_books) <= 1:
+            # All results are from the same book — try to add one from elsewhere
+            for r in sorted_results:
+                if r.get("book") in unique_books:
+                    continue
+                text_hash = hash(r["text"][:200])
+                if text_hash in seen_text_hashes:
+                    continue
+                seen_text_hashes.add(text_hash)
+                refined.append(r)
+                print(f"  [refine] Injected diversity chunk from: {r.get('book')!r}")
+                break
 
     return refined
 
@@ -1234,6 +1318,17 @@ def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
                 "- ඉගැන්වීමේ ප්‍රායෝගික මානයක් ඇත්නම්, එය කෙටියෙන් සඳහන් කරන්න.\n"
                 "- ලිතිකාංක හෝ ලැයිස්තු භාවිත නොකරන්න. ගලා යන, උණුසුම් ගද්‍යයෙන් ලියන්න."
             )
+        if religion == "Hinduism":
+            return (
+                "- සිංහල භාෂාවෙන් පිළිතුරු දෙන්න.\n"
+                "- ප්‍රශ්නය නැවත සඳහන් කිරීමෙන් හෝ ප්‍රතිනිර්මාණය කිරීමෙන් වළකින්න. "
+                "කෙලින්ම පිළිතුරු දීමෙන් ආරම්භ කරන්න.\n"
+                "- අලුත් අයෙකුට තේරෙන සරල, මානවීය පැහැදිලි කිරීමකින් ආරම්භ කරන්න.\n"
+                "- ශාස්ත්‍රය ප්‍රකාශ කරන දේ ස්වාභාවිකව ප්‍රභව ශාස්ත්‍රය සඳහන් කරමින් "
+                "ඒ සහාය ලබා දෙන්න (උදා. \"භගවද් ගීතාවේ සඳහන් ලෙස...\").\n"
+                "- ඉගැන්වීමේ අධ්‍යාත්මික හෝ ප්‍රායෝගික මානයක් ඇත්නම්, එය කෙටියෙන් සඳහන් කරන්න.\n"
+                "- ලිතිකාංක හෝ ලැයිස්තු භාවිත නොකරන්න. ගලා යන, උණුසුම් ගද්‍යයෙන් ලියන්න."
+            )
         return (
             "- සිංහල භාෂාවෙන් පිළිතුරු දෙන්න.\n"
             "- අලුත් අයෙකුට තේරෙන සරල, මානවීය පැහැදිලි කිරීමකින් ආරම්භ කරන්න.\n"
@@ -1251,6 +1346,17 @@ def _format_instructions(religion: str, is_list: bool, lang: str) -> str:
                 "- மறைநூல் கூறுவதை இயற்கையாக ஆதாரமாக மேற்கோள் காட்டவும் "
                 "(எ.கா. 'சம்யுத்த நிகாயத்தில் காணப்படுவது போல்...').\n"
                 "- போதனையில் நடைமுறை பரிமாணம் இருந்தால், சுருக்கமாக குறிப்பிடவும்.\n"
+                "- புள்ளிகள் அல்லது பட்டியல்களைப் பயன்படுத்தாதீர்கள். இயல்பான, அன்பான உரைநடையில் எழுதவும்."
+            )
+        if religion == "Hinduism":
+            return (
+                "- தமிழ் மொழியில் பதில் அளிக்கவும்.\n"
+                "- கேள்வியை மீண்டும் கூறுவதோ மொழிபெயர்ப்பதோ வேண்டாம். "
+                "நேரடியாக பதிலிலிருந்து தொடங்கவும்.\n"
+                "- புதியவர்கள் புரிந்துகொள்ளக்கூடிய எளிமையான, மனித விளக்கத்துடன் தொடங்கவும்.\n"
+                "- மறைநூல் கூறுவதை இயற்கையாக ஆதாரமாக மேற்கோள் காட்டவும் "
+                "(எ.கா. 'பகவத் கீதையில் கூறப்பட்டுள்ளது போல்...').\n"
+                "- போதனையில் ஆன்மிக அல்லது நடைமுறை பரிமாணம் இருந்தால், சுருக்கமாக குறிப்பிடவும்.\n"
                 "- புள்ளிகள் அல்லது பட்டியல்களைப் பயன்படுத்தாதீர்கள். இயல்பான, அன்பான உரைநடையில் எழுதவும்."
             )
         return (
@@ -1461,9 +1567,63 @@ _CHRISTIAN_REPLACEMENTS = [
     ("ස්වාමියා",                    "ස්වාමීන් වහන්සේ"),
 ]
 
+
+# ── Hinduism Sinhala post-translation replacements ───────────────────────────
+# Fixes Google Translate mistranslations of common English metaphor phrases
+# that appear in Hindu scripture answers.
+_HINDU_REPLACEMENTS = [
+    # "are like" / "is like" constructions
+    ("වැනි වේ",          "වැනිය"),
+    ("වැනිය වේ",         "වැනිය"),
+    ("ලෙස පවතී",         "වැනිය"),
+    ("ආකාරයේ වේ",        "වැනිය"),
+    ("ආකාරයෙන් වේ",      "වැනිය"),
+    ("ආකාරයකි",          "වැනිය"),
+    ("ආකාරයෙකි",         "වැනිය"),
+    ("ආකාරයේය",          "වැනිය"),
+    ("වැනි ය",           "වැනිය"),
+    ("සමාන වේ",          "වැනිය"),
+    ("සමානය",            "වැනිය"),
+    # Fabric/cloth metaphor mistranslations
+    ("ජීවිතයේ රෙදිපිළි", "ජීවිතයේ ස්වභාවය"),
+    ("රෙදිපිළි සෑදෙන",   "ගොඩනැගෙන"),
+    ("රෙදිපිළි",         "ස්වභාවය"),
+    ("රෙදි",             "ස්වභාවය"),
+    ("වියන ලද",          "බැඳී ඇති"),
+    ("වියා ඇති",         "බැඳී ඇති"),
+    ("නූල් වැනිය",       "අංග වැනිය"),
+    # Unnatural "essence" translations
+    ("සාරයයි",           "ගුණාංගයයි"),
+    ("සාරය වේ",          "ගුණාංගයයි"),
+    # Garbled Google Translate artifacts
+    ("එක්තරා වැනියන්",   ""),
+    ("එක්තරා වැනියන්,",  ""),
+    ("එක්තරා වැනියන්.",  ""),
+    # Honorific spelling corrections
+    ("ස්වාමින් වහන්සේ",   "ස්වාමීන් වහන්සේ"),
+    # ── Unnatural connectors / garbled phrases ───────────────────────────
+    ("නොහෝත්",                      "හෙවත්"),
+    ("සාරාංශයක් ලෙස",            "කෙර්වට"),
+    ("යමකුකු ",                    "යමකු "),
+    # ── Inline Sanskrit glosses bypassing bracket scrubber ───────────────
+    (" “අබය”",                   ""),
+    (" “අබයම”",                  ""),
+    (" (අබය)",                    ""),
+    (" (අබයම)",                   ""),
+    (" “මෝක්ෂ”",                  ""),
+    (" (මෝක්ෂ)",                   ""),
+    # ── Deity name variants ───────────────────────────────────────────────
+    ("ක෌ෂ්ණු",                      "කෝලා"),
+    ("ක්රිෂ්ණු",                    "කෝලා"),
+    ("කෘරුණු",                      "කෝලා"),
+]
+
 def _apply_respectful_titles(text: str, religion: str = "Buddhism") -> str:
     if religion == "Christianity":
         for wrong, correct in _CHRISTIAN_REPLACEMENTS:
+            text = text.replace(wrong, correct)
+    elif religion == "Hinduism":
+        for wrong, correct in _HINDU_REPLACEMENTS:
             text = text.replace(wrong, correct)
     else:
         for a, b in _BUDDHA_REPLACEMENTS:
@@ -1658,16 +1818,83 @@ def _is_topic_mismatch(en_query: str, answer: str) -> bool:
 # Sinhala answer helpers
 # ════════════════════════════════════════════════════════════════
 
+# ════════════════════════════════════════════════════════════════
+# Hindu enumeration detection
+# ════════════════════════════════════════════════════════════════
+
+_HINDU_ENUM_SETS = {
+    "three gunas":   ["Sattva", "Rajas", "Tamas"],
+    "triguna":       ["Sattva", "Rajas", "Tamas"],
+    "tri guna":      ["Sattva", "Rajas", "Tamas"],
+    "gunas":         ["Sattva", "Rajas", "Tamas"],
+    "purushartha":   ["Dharma", "Artha", "Kama", "Moksha"],
+    "four aims":     ["Dharma", "Artha", "Kama", "Moksha"],
+    "kosha":         ["Annamaya", "Pranamaya", "Manomaya", "Vijnanamaya", "Anandamaya"],
+    "five sheaths":  ["Annamaya", "Pranamaya", "Manomaya", "Vijnanamaya", "Anandamaya"],
+    "eight limbs":   ["Yama", "Niyama", "Asana", "Pranayama", "Pratyahara", "Dharana", "Dhyana", "Samadhi"],
+    "ashtanga":      ["Yama", "Niyama", "Asana", "Pranayama", "Pratyahara", "Dharana", "Dhyana", "Samadhi"],
+    "four varnas":   ["Brahmin", "Kshatriya", "Vaishya", "Shudra"],
+    "varna":         ["Brahmin", "Kshatriya", "Vaishya", "Shudra"],
+    "four ashramas": ["Brahmacharya", "Grihastha", "Vanaprastha", "Sannyasa"],
+    "ashrama":       ["Brahmacharya", "Grihastha", "Vanaprastha", "Sannyasa"],
+    "three paths":   ["Jnana Yoga", "Bhakti Yoga", "Karma Yoga"],
+    "three yogas":   ["Jnana Yoga", "Bhakti Yoga", "Karma Yoga"],
+}
+
+
+def _detect_hindu_enum(en_query: str) -> list[str] | None:
+    """Return required item names if query asks about a known Hindu set, else None."""
+    q = en_query.lower()
+    for keyword, items in _HINDU_ENUM_SETS.items():
+        if keyword in q:
+            return items
+    return None
+
+
 def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
-    """Generate an English answer from English scripture chunks."""
+    """Generate an English answer from English scripture chunks.
+
+    For Hinduism enumeration questions (three gunas, four purusharthas, etc.)
+    a fill-in-the-blank prompt is used so the LLM cannot skip naming any item.
+    """
     ctx = "\n\n---\n\n".join(
         f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
         for r in en_res
     )
+
+    # ── Hinduism enumeration: fill-in-the-blank prompt ───────────────────────
+    if religion == "Hinduism":
+        required_items = _detect_hindu_enum(en_q)
+        if required_items:
+            skeleton = "\n".join(
+                f"{i+1}. {item} —" for i, item in enumerate(required_items)
+            )
+            enum_msg = (
+                f"Scripture context:\n{ctx}\n\n"
+                f"Question: {en_q}\n\n"
+                f"Instructions:\n"
+                f"- Answer ONLY using the scripture context above.\n"
+                f"- Complete the numbered list below. Each item name is already "
+                f"written — add a clear 1-2 sentence description after the dash.\n"
+                f"- Do NOT change, skip, or reorder the item names.\n"
+                f"- Do NOT cite specific verse numbers.\n"
+                f"- After the list, add 1-2 sentences of broader context if helpful.\n\n"
+                f"Answer (complete each line):\n{skeleton}"
+            )
+            raw = _call_groq(_PERSONAS_EN[religion], enum_msg, MODEL_DEFAULT)
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+            # Safety net: if the LLM stripped the skeleton prefix, prepend it
+            if not any(item in raw for item in required_items):
+                raw = skeleton + " " + raw
+            return _trim_incomplete_sentence(raw)
+
+    # ── Standard path (Buddhism, Christianity, non-enum Hinduism) ────────────
     fmt = _format_instructions(religion, _is_list_request(en_q), "en")
     ref = {
         "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
         "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
+        "Hinduism":    "Do NOT cite specific verse numbers (like BG 2.47)",
     }.get(religion, "Do NOT cite specific verse numbers")
     msg = (
         f"Scripture context:\n{ctx}\n\n"
@@ -1722,6 +1949,38 @@ def _review_translation(
                 "  நரகம்         → hell\n"
                 "  மனந்திரும்புதல் → repentance — NOT 'changing one's mind'\n\n"
                 "- பௌத்த சொற்களை கிறிஸ்தவ பதிலில் சேர்க்க வேண்டாம்.\n"
+                "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
+            ),
+            "Hinduism": (
+                "இது ஒரு இந்து பதில். சரியான இந்து தமிழ் சொற்களை பயன்படுத்தவும்.\n\n"
+                "முக்கியமான மொழிபெயர்ப்பு திருத்தங்கள் (Google Translate பிழைகள்):\n"
+                "  ஆத்மா         → ஆத்மன் — NOT 'soul' alone or 'உயிர்'\n"
+                "  பரமாத்மா      → பரமாத்மன் / பரம்பொருள் — NOT 'supreme soul' alone\n"
+                "  கர்மா         → கர்மம் — NOT 'செயல்' alone\n"
+                "  தர்மம்        → தர்மம் — NOT 'மதம்' or 'religion'\n"
+                "  மோட்சம்       → மோட்சம் / முக்தி — NOT 'freedom' or 'liberty'\n"
+                "  சம்சாரம்      → சம்சாரம் — NOT 'குடும்பம்' (family)\n"
+                "  புனர்ஜன்மம்   → மறுபிறவி / புனர்ஜன்மம் — NOT 'rebirth' in Buddhist sense\n"
+                "  மாயை          → மாயை — NOT 'மாயாஜாலம்' (magic tricks)\n"
+                "  குணம் (Guna)  → குணம் — NOT 'தரம்' or 'quality' alone\n"
+                "  சத்வம்        → சத்வம் / சாத்வீகம் — keep the Sanskrit term\n"
+                "  ரஜஸ்          → ரஜஸ் / ராஜஸம் — keep the Sanskrit term\n"
+                "  தமஸ்          → தமஸ் / தாமஸம் — keep the Sanskrit term\n"
+                "  யோகம்         → யோகம் — NOT 'ஒன்றிணைதல்' alone\n"
+                "  பக்தி         → பக்தி — NOT 'அன்பு' alone\n"
+                "  ஞானம்         → ஞானம் / ஞான யோகம் — NOT just 'அறிவு'\n"
+                "  பிரம்மம்      → பிரம்மம் — NOT 'கடவுள்' alone\n"
+                "  அவதாரம்       → அவதாரம் — NOT 'உருவம்' or 'form'\n"
+                "  நிஷ்காம கர்மம் → நிஷ்காம கர்மம் / விருப்பமற்ற செயல்\n"
+                "  பகவத் கீதை   → பகவத் கீதை — keep this name exactly\n"
+                "  உபநிஷதம்     → உபநிஷதம் — NOT 'வேத நூல்' alone\n"
+                "  வேதம்         → வேதம் — NOT 'புனித நூல்' alone\n\n"
+                "- பௌத்த சொற்களை (நிர்வாணம், திரிபிடகம்) இந்து பதிலில் சேர்க்க வேண்டாம்.\n"
+                "- CRITICAL — குண பெயர்கள்: மூன்று குணங்களும் பெயரிட்டு குறிப்பிடப்பட வேண்டும்:\n"
+                "    சத்வ குணம், ரஜஸ் குணம், தமஸ் குணம்.\n"
+                "  ரஜஸ் குணம் (Rajas) பெயரிடாமல் 'செயல்பாட்டு சக்தி' என குறிப்பிட்டிருந்தால்"
+                " — ரஜஸ் குணம் என பெயரிட்டு சேர்க்கவும்.\n"
+                "- கிறிஸ்தவ சொற்களை இந்து பதிலில் சேர்க்க வேண்டாம்.\n"
                 "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
             ),
         }.get(religion, "சரியான மற்றும் இயற்கையான தமிழ் மத சொற்களை பயன்படுத்தவும்.")
@@ -1822,6 +2081,52 @@ def _review_translation(
                 "විශේෂ: ව්‍යාජ සිංහල ශබ්ද ඉංග්‍රීසි මූලාශ්‍රය බලා නිවැරදි කරන්න.\n"
                 "- 'ත්‍රිපිටකය', 'නිර්වාණය', 'ධර්මය' හෝ බෞද්ධ/හින්දු සංකල්ප ඇතුළත් නොකරන්න."
             ),
+            "Hinduism": (
+                "මෙය හින්දු ධර්ම පිළිතුරකි. නිවැරදි හින්දු සිංහල පාරිභාෂිතය භාවිත කරන්න.\n\n"
+                "═══ ආත්ම / ශ්‍රේෂ්ඨ සංකල්ප ═══\n"
+                "  ātman / ātmā   → ආත්මය — NOT 'magic' or 'witch'\n"
+                "  Paramātman     → පරමාත්මය / ශ්‍රේෂ්ඨ ආත්මය\n"
+                "  Brahman        → බ්‍රහ්මන් — NOT 'ශ්‍රේෂ්ඨ ශාස්ත්‍රය', NOT 'Brahma' (the deity)\n"
+                "  moksha         → මෝක්ෂය / මිදීම — NOT 'freedom from prison'\n"
+                "  karma          → කර්මය — NOT 'කාර්ය' (task/work)\n"
+                "  dharma         → ධර්මය — NOT 'ආගම' (religion) alone\n"
+                "  samsara        → සංසාරය — NOT 'ගමනාගමනය' (travel/traffic)\n"
+                "  maya           → මායාව — NOT 'මාය' (magic tricks)\n"
+                "  punarjanma     → නැවත ඉපදීම / පුනර්භවය\n\n"
+                "═══ ගුණ තුන ═══\n"
+                "  sattva (guna)  → සත්ත්ව ගුණය — NOT 'සත්ත්වයා' (animal/being)\n"
+                "  rajas (guna)   → රජස් ගුණය\n"
+                "  tamas (guna)   → තමස් ගුණය — NOT 'අඳුර' alone\n"
+                "  triguna / three gunas → ත්‍රිවිධ ගුණ\n\n"
+                "═══ ශාස්ත්‍ර නාම ═══\n"
+                "  Bhagavad Gita  → භගවද් ගීතාව — keep this name\n"
+                "  Upanishad      → උපනිෂද් — NOT 'අති ශාස්ත්‍රය'\n"
+                "  Veda / Vedas   → වේදය / වේද ශාස්ත්‍රය — NOT 'ශ්‍රේෂ්ඨ ශාස්ත්‍රය'\n"
+                "  Mahabharata    → මහාභාරතය\n"
+                "  Ramayana       → රාමායනය\n"
+                "  Purana         → පුරාණය\n\n"
+                "———————————————————————————————————————————————————————————————————————————————————————————————————————————————————\\n"
+                "- ස්වාමීන් වහන්සේ යනු සාමාන්ය ක්රියාවයක්. මූල් ඊංග්රීසි පාටය බලා යකු දෙවියාගෙ නම යොදන්නය්ක:\\n"
+                "    කෝලා / කෝලය ගෙ කේයුම් කරන්නේ — කෝලා චුණුවයා / කෝලා ජීවිතයේ කේයුම් කරන්නේ බලා යොදන්නය්ක.\\n"
+                "    විෂ්ණු / පුරාණ කේයුම් කරන්නේ — විෂ්ණු දෙවියාගේ යොදන්නය්ක.\\n"
+                "    ශිව කේයුම් කරන්නේ — ශිව දෙවියාගේ යොදන්නය්ක.\\n"
+                "═══ ශ්‍රේෂ්ඨ සංකල්ප ═══\n"
+                "  yoga           → යෝගය — NOT 'ව්‍යායාමය' (exercise) alone\n"
+                "  bhakti         → භක්තිය — NOT 'ප්‍රේමය' alone\n"
+                "  jnana          → ඥාන / ඥාන යෝගය — NOT just 'දැනීම'\n"
+                "  avatar         → අවතාරය — NOT 'රූපය' (form/shape)\n"
+                "  nishkama karma → නිෂ්කාම කර්මය / නිරාශාව කර්ම\n"
+                "  Krishna        → කෘෂ්ණ දෙවිඳු — NOT 'කෘෂ්ණ' alone\n"
+                "  Vishnu         → විෂ්ණු දෙවිඳු\n"
+                "  Shiva          → ශිව දෙවිඳු\n\n"
+                "- 'ශුද්ධ ලියවිල්ල', 'ත්‍රිපිටකය', 'නිර්වාණය' — ක්‍රිස්තියානි/බෞද්ධ පද "
+                "හින්දු පිළිතුරක ඇතුළත් නොකරන්න.\n"
+                "- CRITICAL — ගුණ නාම: ගුණ තුනම නම් සහිතව දිස් විය යුතුය:\n"
+                "    සත්ත්ව ගුණය, රජස් ගුණය, තමස් ගුණය.\n"
+                "  රජස් ගුණය (Rajas) නම් නොකර 'ක්‍රියාශීලී ශක්තිය' ලෙස‍"
+                " සඳහන් කර ඇත්නම් — රජස් ගුණය යයි නම් කර එකතු කරන්න.\n"
+                "- ව්‍යාජ හෝ නොපවතින සිංහල ශබ්ද ඉංග්‍රීසි මූලාශ්‍රය බලා නිවැරදි කරන්න."
+            ),
         }.get(religion, "නිවැරදි සහ ස්වාභාවික සිංහල ආගමික පාරිභාෂිතය භාවිත කරන්න.")
 
         system_prompt = (
@@ -1918,13 +2223,25 @@ def _english_context_then_translate(
     )
     translated  = _scrub_fabricated_book_cites(translated, en_context)
     translated  = _scrub_off_topic_book_tangents(translated, en_context)
+    if religion == "Hinduism":
+        translated = _scrub_scholarly_notation(translated)
     if target_lang in ("si", "ta"):
         translated = _apply_respectful_titles(translated, religion)
     translated, extra_warnings = moderate_output(translated, en_context, religion, target_lang)
 
     warning_key = f"used_en_context_with_translation_{target_lang}"
-    matched = [r for r in en_res if r["book"].lower() in translated.lower()]
-    disp    = matched if matched else en_res
+
+    # Patch missing book field for Hinduism (no dedicated 'book' column — falls
+    # back to pitaka/section label).  Must happen before _unique_sources.
+    for r in en_res:
+        if not r.get("book"):
+            r["book"] = (r.get("pitaka") or r.get("source") or "").strip()
+
+    # The translated answer is in Sinhala/Tamil so English book names will never
+    # appear in the text — skip the name-match filter and always show all sources.
+    disp = [r for r in en_res if r.get("book")]
+    if not disp:
+        disp = en_res
     src, scores_out = _unique_sources(disp)
     return {
         "answer":         translated,
@@ -2087,6 +2404,25 @@ def answer_question(
         en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [ta] EN query: {en_query!r}")
 
+        # Re-moderate the translated English query — catches unsafe content
+        # that was obscured by Tamil script (e.g. cross-religion comparisons).
+        is_safe_en, reason_en = moderate_input(en_query, religion=religion)
+        if not is_safe_en:
+            fb = _FALLBACK_MESSAGES.get("ta", _FALLBACK_MESSAGES["en"])
+            return {
+                "answer":         fb.get(reason_en, "This question cannot be answered."),
+                "sources":        [],
+                "scores":         [],
+                "flagged":        True,
+                "low_confidence": False,
+                "warnings":       [reason_en],
+            }
+
+        # Hinduism: no native Tamil chunks — use English retrieval + translate.
+        if religion == "Hinduism":
+            print("  [ta] Hinduism — using English context + translation")
+            return _english_context_then_translate(question, en_query, religion, target_lang="ta")
+
         # For Christianity: first try native Tamil chunks from chunks-en-si-ta.db
         if religion == "Christianity":
             from retrieve import search_christianity_native_lang
@@ -2126,6 +2462,25 @@ def answer_question(
         en_query = _translate_query_to_english(question, religion=religion)
         print(f"  [si] Original question: {question[:80]!r}")
         print(f"  [si] Translated EN query: {en_query!r}")
+
+        # Re-moderate the translated English query — catches unsafe content
+        # that was obscured by Sinhala script (e.g. cross-religion comparisons).
+        is_safe_en, reason_en = moderate_input(en_query, religion=religion)
+        if not is_safe_en:
+            fb = _FALLBACK_MESSAGES.get("si", _FALLBACK_MESSAGES["en"])
+            return {
+                "answer":         fb.get(reason_en, "This question cannot be answered."),
+                "sources":        [],
+                "scores":         [],
+                "flagged":        True,
+                "low_confidence": False,
+                "warnings":       [reason_en],
+            }
+
+        # Hinduism: no native Sinhala chunks — use English retrieval + translate.
+        if religion == "Hinduism":
+            print("  [si] Hinduism — using English context + translation")
+            return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
         # Christianity: first try native Sinhala chunks from chunks-en-si-ta.db,
         # then fall back to the English-context + translate path.
@@ -2278,6 +2633,8 @@ def answer_question(
 
     final_answer, warnings = moderate_output(raw_answer, context, religion, lang)
     final_answer = _scrub_question_echo(final_answer)
+    if religion == "Hinduism":
+        final_answer = _scrub_scholarly_notation(final_answer)
 
     # Patch missing book field so sources work for DB schemas without a book column
     # (e.g. Hinduism — falls back to pitaka/section label or source)

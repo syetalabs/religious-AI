@@ -148,10 +148,7 @@ def ask_question(request: QuestionRequest):
     if request.religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {request.religion}. Supported: {supported}")
 
-    # Hinduism only supports English for now
     language = request.language
-    if request.religion == "Hinduism" and language not in ("en", "english"):
-        language = "en"
 
     from retrieve import _lazy_load
     from rag_answer import answer_question
