@@ -3,10 +3,11 @@
 **A multi-religious, multilingual AI chatbot grounded in scripture**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-red)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18%2B-61DAFB)](https://react.dev/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Sponsor](https://img.shields.io/badge/Sponsor-❤️-blue)](https://fund.syetalabs.org/en/explore/multi-religious-ai-platform)
 
 [**Live Demo**](https://religious-ai.syetalabs.org/) · [**Report a Bug**](https://github.com/syetalabs/religious-AI/issues/new?template=bug_report.md) · [**Request a Feature**](https://github.com/syetalabs/religious-AI/issues/new?template=feature_request.md)
 
