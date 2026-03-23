@@ -66,9 +66,10 @@ _PERSONAS_EN = {
     "Hinduism": """You are a knowledgeable and compassionate Hindu guide speaking to someone seeking to understand Hinduism and its sacred scriptures.
 
 Rules you must follow without exception:
-- Answer ONLY using the scripture context provided between [Source: ...] tags. Do not use your own knowledge under any circumstances.
-- If the context does not contain enough information, say exactly:
+- Answer ONLY using the scripture context provided between [Source: ...] tags.
+  If the provided context does not directly answer the question, say EXACTLY:
   "I do not have enough reliable scriptural context to answer this accurately."
+  Do NOT fill gaps with your own knowledge under ANY circumstances.
 - Use simple, clear, everyday language that is welcoming to newcomers.
 - Begin with the most human, relatable aspect of the teaching before going deeper.
 - Keep answers concise — 3 to 5 sentences unless the question requires more detail.
@@ -77,21 +78,24 @@ Rules you must follow without exception:
 - Do not mix teachings from other traditions.
 - Maintain a warm, reverent, and welcoming tone at all times.
 - NEVER restate or paraphrase the user's question in your answer. Start directly with the answer.
-- When referencing scripture, ONLY mention a text name if it appears in the [Source: ...] tags above. Never cite a text from memory.
+- CRITICAL SOURCE RULE: When referencing a scripture by name (e.g. "As the Bhagavad Gita says..."),
+  you MUST check that the exact scripture name appears in the [Source: ...] tag for that passage.
+  NEVER say "the Bhagavad Gita says" if the source tag shows "Bhagavata Purana" — these are different texts.
+  If unsure which text a passage comes from, say "as the scripture says" without naming the text.
 
 CRITICAL — Quoting rules:
-- Do NOT cite specific verse references (e.g. Bhagavad Gita 2.47, Upanishad 1.1) unless those exact references appear word-for-word in the provided context.
+- Do NOT reproduce long direct quotes from the scripture context. Paraphrase the teaching in your own words.
+  If you must quote, keep it to ONE short phrase of no more than 8 words.
+- Do NOT cite specific verse references (e.g. Bhagavad Gita 2.47) unless they appear word-for-word in the context.
 - Do NOT cite or mention any scripture name unless it appears in the [Source: ...] tags above.
 - Do NOT reproduce or paraphrase text not present in the provided context.
-- Never invent or recall verse references or text names from memory — only use what is explicitly in the context.
+- Never invent or recall verse references or text names from memory.
 
 HARD RULE for enumeration answers: When answering about any named set of concepts (such as the three gunas, four purusharthas, five koshas, eight limbs of yoga, etc.), ALWAYS present them as a clearly structured list naming each item explicitly before describing it. For example, for the three gunas write:
 1. Sattva — [description]
 2. Rajas — [description]
 3. Tamas — [description]
-Every item in the set must be named first, then described.
-
-QUOTING RULE: Do NOT reproduce long direct quotes from the scripture context. Paraphrase the teaching in your own words instead. If you must reference specific wording, keep it to one short phrase of no more than 10 words, and only if those exact words appear in the provided context.""",
+Every item in the set must be named first, then described.""",
 
     "Buddhism": """You are a knowledgeable and compassionate Buddhist guide speaking to someone new to Buddhism.
 
@@ -1190,6 +1194,15 @@ def _unique_sources(results: list[dict]) -> tuple[list[str], list[float]]:
     return order, [seen[b] for b in order]
 
 def _refine_results(results: list[dict], religion: str) -> list[dict]:
+    # Defensive patch — ensure every chunk has a non-empty 'book' field.
+    # Hinduism DB uses 'section' as the scripture name; retrieve.py maps it to
+    # 'book' via "section AS book", but apply this as a safety net too.
+    for r in results:
+        if not r.get("book"):
+            r["book"] = (
+                r.get("section") or r.get("pitaka") or r.get("source") or ""
+            ).strip()
+
     book_counts      = {}
     seen_text_hashes = set()
     refined          = []
@@ -1247,14 +1260,20 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
         if len(unique_books) <= 1:
             # All results are from the same book — try to add one from elsewhere
             for r in sorted_results:
-                if r.get("book") in unique_books:
+                candidate_book = (
+                    r.get("book") or r.get("section") or r.get("pitaka") or r.get("source") or ""
+                ).strip()
+                if not candidate_book:
+                    continue  # skip chunks with no identifiable source
+                if candidate_book in unique_books:
                     continue
                 text_hash = hash(r["text"][:200])
                 if text_hash in seen_text_hashes:
                     continue
                 seen_text_hashes.add(text_hash)
+                r["book"] = candidate_book  # patch so downstream code can use it
                 refined.append(r)
-                print(f"  [refine] Injected diversity chunk from: {r.get('book')!r}")
+                print(f"  [refine] Injected diversity chunk from: {candidate_book!r}")
                 break
 
     return refined
@@ -1285,6 +1304,69 @@ _LIST_PATTERNS = [
 
 def _is_list_request(query: str) -> bool:
     return any(re.search(p, query.lower()) for p in _LIST_PATTERNS)
+
+
+# ════════════════════════════════════════════════════════════════
+# Broad / vague question detection (Hinduism)
+# ════════════════════════════════════════════════════════════════
+# Only intercepts questions that ask what an ENTIRE scripture "says/teaches"
+# with no specific topic. Definition questions like "What are the Vedas?"
+# or "What is karma?" are NOT intercepted — they are specific and answerable.
+
+_BROAD_HINDU_PATTERNS = [
+    # "What does/do the Gita/Vedas say/teach/contain?" — no specific topic
+    r"\bwhat do(?:es)? (the )?(bhagavad\s*gita|gita|vedas?|upanishads?|mahabharata|ramayana|puranas?|manusmriti)\b.{0,30}(say|teach|tell us|contain|cover|talk about)\b",
+    # "Tell me about the Bhagavad Gita" — too open-ended
+    r"\btell me about (the )?(bhagavad\s*gita|mahabharata|ramayana)\b\s*\??$",
+    # "Explain the Bhagavad Gita" — whole scripture summary
+    r"\bexplain (the )?(bhagavad\s*gita|mahabharata|ramayana)\b\s*\??$",
+    # "What is the Bhagavad Gita?" — whole-scripture summary (NOT concept definitions)
+    r"\bwhat is (the )?bhagavad\s*gita\b\s*\??$",
+    # Summarise / overview requests
+    r"\bsummar(?:ise|ize)\b.{0,30}(bhagavad\s*gita|vedas?|upanishads?|mahabharata|ramayana)",
+    r"\boverview of (the )?(bhagavad\s*gita|vedas?|hinduism|upanishads?)\b",
+    r"\bintroduce (the )?(bhagavad\s*gita|vedas?|hinduism|upanishads?)\b",
+]
+
+_BROAD_REDIRECT = {
+    "en": (
+        "The Bhagavad Gita and other Hindu scriptures cover many deep teachings. "
+        "Could you ask about a specific topic? For example:\n"
+        "- What is karma?\n"
+        "- What is dharma?\n"
+        "- What is moksha (liberation)?\n"
+        "- What do the scriptures say about the soul (atman)?\n"
+        "- What are the three gunas?\n"
+        "- What is yoga according to Hindu scripture?"
+    ),
+    "ta": (
+        "பகவத் கீதை மற்றும் இந்து மறைநூல்கள் பல ஆழமான போதனைகளை உள்ளடக்கியுள்ளன. "
+        "குறிப்பிட்ட ஒரு தலைப்பைப் பற்றி கேட்க முடியுமா? எடுத்துக்காட்டாக:\n"
+        "- கர்மம் என்றால் என்ன?\n"
+        "- தர்மம் என்றால் என்ன?\n"
+        "- மோட்சம் என்றால் என்ன?\n"
+        "- ஆத்மா பற்றி மறைநூல்கள் என்ன சொல்கின்றன?\n"
+        "- மூன்று குணங்கள் என்னென்ன?\n"
+        "- யோகம் என்றால் என்ன?"
+    ),
+    "si": (
+        "භගවද් ගීතාව සහ හින්දු ශාස්ත්‍ර ගැඹුරු ඉගැන්වීම් රාශියක් ආවරණය කරයි. "
+        "නිශ්චිත මාතෘකාවක් ගැන අසන්න හැකිද? උදාහරණ:\n"
+        "- කර්මය යනු කුමක්ද?\n"
+        "- ධර්මය යනු කුමක්ද?\n"
+        "- මෝක්ෂය යනු කුමක්ද?\n"
+        "- ආත්මය ගැන ශාස්ත්‍ර කුමක් කියනවාද?\n"
+        "- ත්‍රිවිධ ගුණ මොනවාද?\n"
+        "- යෝගය යනු කුමක්ද?"
+    ),
+}
+
+
+def _is_broad_hindu_question(en_query: str) -> bool:
+    """Return True only for vague whole-scripture questions, not specific concept questions."""
+    q = en_query.lower().strip()
+    return any(re.search(p, q) for p in _BROAD_HINDU_PATTERNS)
+
 
 # ════════════════════════════════════════════════════════════════
 # Format instructions
@@ -1857,6 +1939,17 @@ def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
     For Hinduism enumeration questions (three gunas, four purusharthas, etc.)
     a fill-in-the-blank prompt is used so the LLM cannot skip naming any item.
     """
+    # Patch missing book field — Hinduism DB uses 'section', already mapped by
+    # retrieve.py, but apply defensively here too.
+    for r in en_res:
+        if not r.get("book"):
+            r["book"] = (
+                r.get("section") or r.get("pitaka") or r.get("source") or ""
+            ).strip()
+    # Drop chunks that still have no identifiable source — they pollute the
+    # context and cause the LLM to hallucinate.
+    en_res = [r for r in en_res if r.get("book")]
+
     ctx = "\n\n---\n\n".join(
         f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
         for r in en_res
@@ -1952,35 +2045,60 @@ def _review_translation(
                 "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
             ),
             "Hinduism": (
-                "இது ஒரு இந்து பதில். சரியான இந்து தமிழ் சொற்களை பயன்படுத்தவும்.\n\n"
-                "முக்கியமான மொழிபெயர்ப்பு திருத்தங்கள் (Google Translate பிழைகள்):\n"
-                "  ஆத்மா         → ஆத்மன் — NOT 'soul' alone or 'உயிர்'\n"
-                "  பரமாத்மா      → பரமாத்மன் / பரம்பொருள் — NOT 'supreme soul' alone\n"
-                "  கர்மா         → கர்மம் — NOT 'செயல்' alone\n"
-                "  தர்மம்        → தர்மம் — NOT 'மதம்' or 'religion'\n"
-                "  மோட்சம்       → மோட்சம் / முக்தி — NOT 'freedom' or 'liberty'\n"
-                "  சம்சாரம்      → சம்சாரம் — NOT 'குடும்பம்' (family)\n"
-                "  புனர்ஜன்மம்   → மறுபிறவி / புனர்ஜன்மம் — NOT 'rebirth' in Buddhist sense\n"
-                "  மாயை          → மாயை — NOT 'மாயாஜாலம்' (magic tricks)\n"
-                "  குணம் (Guna)  → குணம் — NOT 'தரம்' or 'quality' alone\n"
-                "  சத்வம்        → சத்வம் / சாத்வீகம் — keep the Sanskrit term\n"
-                "  ரஜஸ்          → ரஜஸ் / ராஜஸம் — keep the Sanskrit term\n"
-                "  தமஸ்          → தமஸ் / தாமஸம் — keep the Sanskrit term\n"
-                "  யோகம்         → யோகம் — NOT 'ஒன்றிணைதல்' alone\n"
-                "  பக்தி         → பக்தி — NOT 'அன்பு' alone\n"
-                "  ஞானம்         → ஞானம் / ஞான யோகம் — NOT just 'அறிவு'\n"
-                "  பிரம்மம்      → பிரம்மம் — NOT 'கடவுள்' alone\n"
-                "  அவதாரம்       → அவதாரம் — NOT 'உருவம்' or 'form'\n"
-                "  நிஷ்காம கர்மம் → நிஷ்காம கர்மம் / விருப்பமற்ற செயல்\n"
-                "  பகவத் கீதை   → பகவத் கீதை — keep this name exactly\n"
-                "  உபநிஷதம்     → உபநிஷதம் — NOT 'வேத நூல்' alone\n"
-                "  வேதம்         → வேதம் — NOT 'புனித நூல்' alone\n\n"
+                "இது ஒரு இந்து மறைநூல் பதில். சரியான இந்து தமிழ் சொற்களை பயன்படுத்தவும்.\n\n"
+
+                "═══ CRITICAL — மூல நூல் பெயர் திருத்தம் ═══\n"
+                "பகவத் கீதை (Bhagavad Gita) மற்றும் பாகவத புராணம் (Bhagavata Purana) வேறு வேறு நூல்கள்.\n"
+                "மொழிபெயர்ப்பில் 'பகவத் கீதை கூறுவது போல்' என்று இருந்தால், ஆனால் ஆதாரம் "
+                "Bhagavata Purana என்று இருந்தால் — 'பாகவத புராணம் கூறுவது போல்' என திருத்தவும்.\n"
+                "எந்த நூலில் இருந்து வந்தது என்று தெரியாவிட்டால் 'மறைநூல் கூறுவது போல்' என்று மட்டும் எழுதவும்.\n\n"
+
+                "═══ நூல் பெயர்கள் (சரியான தமிழ் வடிவம்) ═══\n"
+                "  Bhagavad Gita     → பகவத் கீதை\n"
+                "  Bhagavata Purana  → பாகவத புராணம் (NOT பகவத் கீதை)\n"
+                "  Vishnu Purana     → விஷ்ணு புராணம்\n"
+                "  Shiva Purana      → சிவ புராணம்\n"
+                "  Mahabharata       → மகாபாரதம்\n"
+                "  Ramayana          → இராமாயணம்\n"
+                "  Upanishad         → உபநிஷதம்\n"
+                "  Vedas             → வேதங்கள்\n"
+                "  Yoga Sutras       → யோக சூத்திரங்கள்\n"
+                "  Laws of Manu      → மனு தர்மசாஸ்திரம்\n\n"
+
+                "═══ முக்கிய இந்து சொற்கள் (சரியான தமிழ்) ═══\n"
+                "  ātman / ātmā      → ஆத்மா / ஆத்மன் — NOT 'உயிர்' மட்டும்\n"
+                "  Paramātman        → பரமாத்மன் / பரம்பொருள்\n"
+                "  Brahman           → பிரம்மம் — NOT 'கடவுள்' மட்டும், NOT Brahma (தேவன்)\n"
+                "  karma             → கர்மம் — NOT 'செயல்' மட்டும்\n"
+                "  dharma            → தர்மம் — NOT 'மதம்'\n"
+                "  moksha            → மோட்சம் / முக்தி — NOT 'சுதந்திரம்' மட்டும்\n"
+                "  samsara           → சம்சாரம் (பிறவிச் சுழற்சி) — NOT 'குடும்பம்'\n"
+                "  maya              → மாயை — NOT 'மாயாஜாலம்'\n"
+                "  punarjanma        → மறுபிறவி / புனர்ஜன்மம்\n"
+                "  avatar            → அவதாரம் — NOT 'உருவம்'\n"
+                "  yoga              → யோகம் — NOT 'ஒன்றிணைதல்' மட்டும்\n"
+                "  bhakti            → பக்தி — NOT 'அன்பு' மட்டும்\n"
+                "  jnana             → ஞானம் — NOT 'அறிவு' மட்டும்\n"
+                "  nishkama karma    → நிஷ்காம கர்மம் (பலனை எதிர்பாராத செயல்)\n"
+                "  tapas             → தவம் / தபஸ்\n"
+                "  ahimsa            → அகிம்சை (கொல்லாமை)\n"
+                "  puja              → பூஜை\n"
+                "  mantra            → மந்திரம்\n"
+                "  guru              → குரு\n"
+                "  ashrama           → ஆச்சிரமம் (வாழ்க்கை நிலைகள்)\n"
+                "  varna             → வர்ணம்\n"
+                "  rishi / muni      → ரிஷி / முனிவர்\n"
+                "  kalpataru         → கல்பதரு (ஆசையை நிறைவேற்றும் சொர்க்க மரம்)\n"
+                "  purushartha       → புருஷார்த்தம் (மனித வாழ்வின் நோக்கங்கள்)\n"
+                "  dharma/artha/kama/moksha → தர்மம் / அர்த்தம் / காமம் / மோட்சம்\n\n"
+
+                "═══ மூன்று குணங்கள் — CRITICAL ═══\n"
+                "  sattva → சத்வ குணம், rajas → ரஜஸ் குணம், tamas → தமஸ் குணம்.\n"
+                "மூன்றும் பெயரிட்டு குறிப்பிடப்பட வேண்டும். 'செயல்பாட்டு சக்தி' என்று மட்டும் எழுதாதீர்கள்.\n\n"
+
                 "- பௌத்த சொற்களை (நிர்வாணம், திரிபிடகம்) இந்து பதிலில் சேர்க்க வேண்டாம்.\n"
-                "- CRITICAL — குண பெயர்கள்: மூன்று குணங்களும் பெயரிட்டு குறிப்பிடப்பட வேண்டும்:\n"
-                "    சத்வ குணம், ரஜஸ் குணம், தமஸ் குணம்.\n"
-                "  ரஜஸ் குணம் (Rajas) பெயரிடாமல் 'செயல்பாட்டு சக்தி' என குறிப்பிட்டிருந்தால்"
-                " — ரஜஸ் குணம் என பெயரிட்டு சேர்க்கவும்.\n"
                 "- கிறிஸ்தவ சொற்களை இந்து பதிலில் சேர்க்க வேண்டாம்.\n"
+                "- நேரடி மேற்கோள்களை குறைக்கவும் — அர்த்தத்தை சொந்த வார்த்தைகளில் சொல்லவும்.\n"
                 "- Google Translate இன் தவறான மொழிபெயர்ப்புகளை சரிசெய்யவும்."
             ),
         }.get(religion, "சரியான மற்றும் இயற்கையான தமிழ் மத சொற்களை பயன்படுத்தவும்.")
@@ -2420,6 +2538,12 @@ def answer_question(
 
         # Hinduism: no native Tamil chunks — use English retrieval + translate.
         if religion == "Hinduism":
+            if _is_broad_hindu_question(en_query):
+                print("  [ta] Broad Hinduism question — returning redirect")
+                return {
+                    "answer": _BROAD_REDIRECT["ta"], "sources": [], "scores": [],
+                    "flagged": False, "low_confidence": False, "warnings": ["broad_question_redirect"],
+                }
             print("  [ta] Hinduism — using English context + translation")
             return _english_context_then_translate(question, en_query, religion, target_lang="ta")
 
@@ -2479,6 +2603,12 @@ def answer_question(
 
         # Hinduism: no native Sinhala chunks — use English retrieval + translate.
         if religion == "Hinduism":
+            if _is_broad_hindu_question(en_query):
+                print("  [si] Broad Hinduism question — returning redirect")
+                return {
+                    "answer": _BROAD_REDIRECT["si"], "sources": [], "scores": [],
+                    "flagged": False, "low_confidence": False, "warnings": ["broad_question_redirect"],
+                }
             print("  [si] Hinduism — using English context + translation")
             return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
@@ -2590,6 +2720,15 @@ def answer_question(
     # ENGLISH PATH
     # ════════════════════════════════════════════════════════════
     print(f"  [en] lang={lang!r} model={MODEL_DEFAULT!r} question={question[:60]!r}")
+
+    # Intercept broad/vague Hinduism questions before RAG
+    if religion == "Hinduism" and _is_broad_hindu_question(question):
+        print("  [en] Broad Hinduism question — returning redirect")
+        return {
+            "answer": _BROAD_REDIRECT["en"], "sources": [], "scores": [],
+            "flagged": False, "low_confidence": False, "warnings": ["broad_question_redirect"],
+        }
+
     results = search(question, religion=religion, language="en")
     if not results:
         fb = _FALLBACK_MESSAGES.get(lang, _FALLBACK_MESSAGES["en"])

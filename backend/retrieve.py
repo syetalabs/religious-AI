@@ -279,6 +279,9 @@ def _fetch_chunks(religion: str, ids: list) -> dict:
         book_expr = "title AS book"
     elif "scripture" in col_names:
         book_expr = "scripture AS book"
+    elif "section" in col_names:
+        # Hinduism DB uses 'section' for scripture name (e.g. "Bhagavad Gita")
+        book_expr = "section AS book"
     else:
         book_expr = "'' AS book"
 
