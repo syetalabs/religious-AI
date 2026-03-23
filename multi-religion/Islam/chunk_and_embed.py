@@ -45,8 +45,8 @@ FAISS_PATH      = DATA_DIR / "faiss_index.bin"
 # Settings
 # ─────────────────────────────────────────────────────────────────────────────
 
-CHUNK_SIZE    = 400     # words per chunk (for long passages)
-CHUNK_OVERLAP = 80
+CHUNK_SIZE    = 80      # words per chunk (~2-3 verses per chunk)
+CHUNK_OVERLAP = 25      # ~1 verse of overlap so no verse is ever lost at a boundary
 MODEL_NAME    = "all-MiniLM-L6-v2"
 
 # ─────────────────────────────────────────────────────────────────────────────
