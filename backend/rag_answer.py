@@ -1190,6 +1190,15 @@ def _unique_sources(results: list[dict]) -> tuple[list[str], list[float]]:
     return order, [seen[b] for b in order]
 
 def _refine_results(results: list[dict], religion: str) -> list[dict]:
+    # Defensive patch — ensure every chunk has a non-empty 'book' field.
+    # Hinduism DB uses 'section' as the scripture name; retrieve.py maps it to
+    # 'book' via "section AS book", but apply this as a safety net too.
+    for r in results:
+        if not r.get("book"):
+            r["book"] = (
+                r.get("section") or r.get("pitaka") or r.get("source") or ""
+            ).strip()
+
     book_counts      = {}
     seen_text_hashes = set()
     refined          = []
@@ -1247,14 +1256,20 @@ def _refine_results(results: list[dict], religion: str) -> list[dict]:
         if len(unique_books) <= 1:
             # All results are from the same book — try to add one from elsewhere
             for r in sorted_results:
-                if r.get("book") in unique_books:
+                candidate_book = (
+                    r.get("book") or r.get("section") or r.get("pitaka") or r.get("source") or ""
+                ).strip()
+                if not candidate_book:
+                    continue  # skip chunks with no identifiable source
+                if candidate_book in unique_books:
                     continue
                 text_hash = hash(r["text"][:200])
                 if text_hash in seen_text_hashes:
                     continue
                 seen_text_hashes.add(text_hash)
+                r["book"] = candidate_book  # patch so downstream code can use it
                 refined.append(r)
-                print(f"  [refine] Injected diversity chunk from: {r.get('book')!r}")
+                print(f"  [refine] Injected diversity chunk from: {candidate_book!r}")
                 break
 
     return refined
@@ -1857,6 +1872,17 @@ def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
     For Hinduism enumeration questions (three gunas, four purusharthas, etc.)
     a fill-in-the-blank prompt is used so the LLM cannot skip naming any item.
     """
+    # Patch missing book field — Hinduism DB uses 'section', already mapped by
+    # retrieve.py, but apply defensively here too.
+    for r in en_res:
+        if not r.get("book"):
+            r["book"] = (
+                r.get("section") or r.get("pitaka") or r.get("source") or ""
+            ).strip()
+    # Drop chunks that still have no identifiable source — they pollute the
+    # context and cause the LLM to hallucinate.
+    en_res = [r for r in en_res if r.get("book")]
+
     ctx = "\n\n---\n\n".join(
         f"[Source: {r['book']} | {r.get('pitaka', '')}]\n{r['text']}"
         for r in en_res
