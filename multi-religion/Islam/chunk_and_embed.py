@@ -45,8 +45,11 @@ FAISS_PATH      = DATA_DIR / "faiss_index.bin"
 # Settings
 # ─────────────────────────────────────────────────────────────────────────────
 
-CHUNK_SIZE    = 80      # words per chunk (~2-3 verses per chunk)
-CHUNK_OVERLAP = 25      # ~1 verse of overlap so no verse is ever lost at a boundary
+# Chunking is intentionally bypassed — each verse is stored as its own chunk.
+# Neighbouring verse context is injected into embed_text only (not stored text),
+# so FAISS finds verses semantically while retrieval returns the exact verse.
+CONTEXT_WINDOW = 2      # number of surrounding verses to inject into embed_text
+                        # (2 = 1 verse before + 1 verse after)
 MODEL_NAME    = "all-MiniLM-L6-v2"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -507,25 +510,6 @@ def _get_synonym_expansion(text: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chunking helper (for passages that exceed CHUNK_SIZE words)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def chunk_text(text: str,
-               size: int    = CHUNK_SIZE,
-               overlap: int = CHUNK_OVERLAP) -> list[str]:
-    words  = text.split()
-    if len(words) <= size:
-        return [text] if text.strip() else []
-    chunks = []
-    step   = max(1, size - overlap)
-    for i in range(0, len(words), step):
-        chunk = " ".join(words[i: i + size])
-        if len(chunk.strip()) > 40:
-            chunks.append(chunk)
-    return chunks
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Load corpus
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -551,13 +535,28 @@ for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
 print(f"\n  Surahs represented: {len(by_surah)}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chunking
+# Build verse-level chunks with neighbouring-verse context in embed_text
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategy:
+#   stored text  = the single verse  (precise retrieval)
+#   embed_text   = preamble + prev verse(s) + THIS verse + next verse(s) + synonyms
+#                  (rich semantic embedding so FAISS finds it by topic/theme)
+# This mirrors how Bible pipelines work: 1 chunk = 1 verse, ~6 236 total.
 # ─────────────────────────────────────────────────────────────────────────────
 
-print(f"\n--- Chunking (max {CHUNK_SIZE} words, {CHUNK_OVERLAP} overlap) ---")
+print(f"\n--- Building verse-level chunks (context window ±{CONTEXT_WINDOW}) ---")
 all_chunks: list[dict] = []
 
-for item in tqdm(corpus, desc="Chunking"):
+# Group corpus by surah so we can look up neighbours within the same surah
+from collections import defaultdict
+surah_verses: dict[int, list[dict]] = defaultdict(list)
+for item in corpus:
+    surah_verses[item.get("surah", 0)].append(item)
+# Sort each surah's verses by ayah number
+for num in surah_verses:
+    surah_verses[num].sort(key=lambda x: x.get("ayah", 0))
+
+for item in tqdm(corpus, desc="Building chunks"):
     raw_text = item.get("text", "").strip()
     section  = item.get("section",  "Unknown")
     category = item.get("category", "Unknown")
@@ -570,48 +569,68 @@ for item in tqdm(corpus, desc="Chunking"):
 
     preamble = _get_topic_preamble(section)
 
-    for raw_chunk in chunk_text(raw_text):
-        parts = []
+    # ── Build neighbouring-verse context ──────────────────────────────────────
+    siblings   = surah_verses[surah]           # all verses in this surah, sorted
+    idx        = next((i for i, v in enumerate(siblings)
+                       if v.get("ayah") == ayah), None)
 
-        # Topic preamble for this surah (greatly improves retrieval)
-        if preamble:
-            parts.append(preamble)
+    prev_texts = []
+    next_texts = []
+    if idx is not None:
+        for offset in range(1, CONTEXT_WINDOW + 1):
+            if idx - offset >= 0:
+                prev_texts.insert(0, siblings[idx - offset].get("text", "").strip())
+            if idx + offset < len(siblings):
+                next_texts.append(siblings[idx + offset].get("text", "").strip())
 
-        # Metadata label
-        parts.append(
-            f"Surah: {section}. Revelation: {category}. Religion: Islam. "
-            f"Quran {surah}:{ayah}."
-        )
+    # ── Assemble embed_text ───────────────────────────────────────────────────
+    parts = []
 
-        # Verse text
-        parts.append(raw_chunk)
+    if preamble:
+        parts.append(preamble)
 
-        # Synonym expansion for semantic coverage
-        synonyms = _get_synonym_expansion(raw_chunk)
-        if synonyms:
-            parts.append(synonyms)
+    parts.append(
+        f"Surah: {section}. Revelation: {category}. Religion: Islam. "
+        f"Quran {surah}:{ayah}."
+    )
 
-        embed_text = " ".join(parts)
+    # Previous verse(s) as context prefix (lighter weight — no label)
+    if prev_texts:
+        parts.append("Context before: " + " ".join(prev_texts))
 
-        all_chunks.append({
-            "text":       raw_chunk,
-            "embed_text": embed_text,
-            "book":       section,      # surah name — matches retrieve.py "book" field
-            "section":    section,
-            "category":   category,
-            "surah":      surah,
-            "ayah":       ayah,
-            "religion":   "Islam",
-            "language":   language,
-        })
+    # The verse itself (labelled so the model weights it highest)
+    parts.append(f"Verse: {raw_text}")
 
-print(f"Total chunks produced: {len(all_chunks):,}")
+    # Following verse(s) as context suffix
+    if next_texts:
+        parts.append("Context after: " + " ".join(next_texts))
+
+    # Synonym expansion for semantic coverage
+    synonyms = _get_synonym_expansion(raw_text)
+    if synonyms:
+        parts.append(synonyms)
+
+    embed_text = " ".join(parts)
+
+    all_chunks.append({
+        "text":       raw_text,        # single clean verse — what gets returned
+        "embed_text": embed_text,      # rich context — what gets embedded
+        "book":       section,
+        "section":    section,
+        "category":   category,
+        "surah":      surah,
+        "ayah":       ayah,
+        "religion":   "Islam",
+        "language":   language,
+    })
+
+print(f"Total chunks produced: {len(all_chunks):,}  (1 chunk = 1 verse)")
 
 # Chunk count by surah
 chunk_by_surah: dict[str, int] = {}
 for c in all_chunks:
     chunk_by_surah[c["section"]] = chunk_by_surah.get(c["section"], 0) + 1
-print(f"\n  Chunks by surah (top 20):")
+print(f"\n  Verses by surah (top 20):")
 for s, count in sorted(chunk_by_surah.items(), key=lambda x: -x[1])[:20]:
     print(f"    {s:<28} {count:>5,}")
 

@@ -48,8 +48,8 @@ SECTIONS_DIR.mkdir(parents=True, exist_ok=True)
 REQUEST_DELAY = 1.0
 TIMEOUT       = 30
 MAX_RETRIES   = 3
-GROUP_SIZE    = 10    # verses per passage (10 verses ≈ 150–300 words — enough for the
-                      # chunker to produce multiple overlapping windows per passage)
+GROUP_SIZE    = 1     # 1 verse per passage — chunk_and_embed enriches each verse's
+                      # embedding with neighbouring verse context at embed time
 
 _session = requests.Session()
 _session.headers.update({
