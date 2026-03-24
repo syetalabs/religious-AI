@@ -82,9 +82,16 @@ _SOURCES = [
     "quranapi_pages",
 ]
 
-_SEMARKETIR_URL   = "https://raw.githubusercontent.com/semarketir/quranjson/master/source/translation/en/en_translation_{n}.json"
+_SEMARKETIR_URL    = "https://raw.githubusercontent.com/semarketir/quranjson/master/source/translation/en/en_translation_{n}.json"
 _ALQURAN_CLOUD_URL = "https://api.alquran.cloud/v1/surah/{n}/en.sahih"
 _QURANAPI_URL      = "https://quranapi.pages.dev/api/{n}.json"
+
+# Tafsir (commentary) sources — fetched per-verse to enrich text content.
+# This is what brings Islam data up to parity with other religions file sizes.
+# Primary  : spa5k/tafsir_api CDN — Tafsir Ibn Kathir English, per-verse JSON
+# Fallback : api.quran.com v4    — tafsir id 169 = Ibn Kathir (English)
+_TAFSIR_CDN_URL       = "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir/en-tafisr-ibn-kathir/{surah}/{ayah}.json"
+_QURAN_COM_TAFSIR_URL = "https://api.quran.com/api/v4/tafsirs/169/by_ayah/{surah}:{ayah}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Surah metadata (all 114 hardcoded — no API call needed)
@@ -284,6 +291,38 @@ def _parse_quranapi_pages(data: dict) -> list[dict]:
             verses.append({"ayah": i, "text": t})
     return verses
 
+
+def _fetch_tafsir(surah_num: int, ayah_num: int) -> str:
+    """
+    Fetch Ibn Kathir tafsir (English commentary) for a single verse.
+    Returns the tafsir text, or empty string if both sources fail.
+    Strips basic HTML tags that the CDN source includes.
+    """
+    import re
+
+    # Source 1: spa5k CDN (fast, no rate limit)
+    url = _TAFSIR_CDN_URL.format(surah=surah_num, ayah=ayah_num)
+    data = _get_json(url)
+    if data:
+        text = (data.get("text") or data.get("tafsir") or "").strip()
+        if text:
+            text = re.sub(r"<[^>]+>", " ", text)   # strip HTML tags
+            text = re.sub(r"\s+", " ", text).strip()
+            return text
+
+    # Source 2: quran.com v4 API
+    url2 = _QURAN_COM_TAFSIR_URL.format(surah=surah_num, ayah=ayah_num)
+    data2 = _get_json(url2)
+    if data2:
+        tafsirs = data2.get("tafsirs") or []
+        if tafsirs:
+            text = (tafsirs[0].get("text") or "").strip()
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            return text
+
+    return ""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Fetch one surah — tries all three sources
 # ─────────────────────────────────────────────────────────────────────────────
@@ -291,7 +330,8 @@ def _parse_quranapi_pages(data: dict) -> list[dict]:
 def _fetch_surah(surah_num: int) -> tuple[list[dict], str]:
     """
     Returns (verses, source_name) where verses is a sorted list of
-    {ayah, text} dicts. Returns ([], '') if all sources fail.
+    {ayah, text, tafsir} dicts. Returns ([], '') if all sources fail.
+    Tafsir (Ibn Kathir commentary) is fetched per-verse to enrich content.
     """
     sources = [
         (
@@ -317,21 +357,35 @@ def _fetch_surah(surah_num: int) -> tuple[list[dict], str]:
             continue
         verses = parser(data)
         if verses:
+            # Enrich each verse with Ibn Kathir tafsir commentary
+            print(f"    Fetching tafsir for {len(verses)} verses ...", flush=True)
+            for v in verses:
+                tafsir = _fetch_tafsir(surah_num, v["ayah"])
+                v["tafsir"] = tafsir
             return verses, source_name
         # data came back but parsed empty — try next source
 
     return [], ""
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Group verses into passages
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _group_verses(verses: list[dict], group_size: int = GROUP_SIZE) -> list[dict]:
+    """
+    Group verses into passages. With GROUP_SIZE=1 each passage is one verse.
+    The stored text combines the translation + tafsir so the JSON is content-rich,
+    bringing Islam data to parity in file size with other religions.
+    Format:  "[ayah] <translation>\nTafsir: <commentary>"
+    """
     passages = []
     for i in range(0, len(verses), group_size):
         group      = verses[i : i + group_size]
         start_ayah = group[0]["ayah"]
-        joined     = "  ".join(f"[{v['ayah']}] {v['text']}" for v in group)
+        parts = []
+        for v in group:
+            verse_line = f"[{v['ayah']}] {v['text']}"
+            tafsir     = v.get("tafsir", "").strip()
+            if tafsir:
+                verse_line += f"\nTafsir: {tafsir}"
+            parts.append(verse_line)
+        joined = "  ".join(parts)
         passages.append({"ayah": start_ayah, "text": joined})
     return passages
 
