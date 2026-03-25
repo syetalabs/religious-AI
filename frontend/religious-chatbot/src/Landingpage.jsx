@@ -98,7 +98,6 @@ export const RELIGIONS = {
     description: "Discover the teachings of the Quran — guidance, mercy, and the path of Islam.",
     placeholder: "Ask about the Quran, prayer, or Islamic teaching…",
     loadingMsg:  "Preparing scripture from the Holy Quran…",
-    comingSoon:  true,
   },
 };
 

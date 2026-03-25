@@ -116,6 +116,10 @@ def health():
             "faiss": Path("/tmp/religious-ai-data/hinduism/faiss_index.bin"),
             "db":    Path("/tmp/religious-ai-data/hinduism/chunks.db"),
         },
+        "islam": {
+            "faiss": Path("/tmp/religious-ai-data/islam/faiss_index.bin"),
+            "db":    Path("/tmp/religious-ai-data/islam/chunks.db"),
+        },
     }.items():
         files_info[religion] = {
             "faiss_index": {
@@ -144,7 +148,7 @@ def ask_question(request: QuestionRequest):
     if not _ready:
         raise HTTPException(status_code=503, detail="Server is still loading data. Please retry in a moment.")
 
-    supported = ["Buddhism", "Christianity", "Hinduism"]
+    supported = ["Buddhism", "Christianity", "Hinduism", "Islam"]
     if request.religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {request.religion}. Supported: {supported}")
 
@@ -207,7 +211,7 @@ def _prepare_religion_bg(religion: str):
 @app.post("/prepare/{religion}")
 def prepare_religion(religion: str):
     """Trigger background download + index load for a religion."""
-    supported = ["Buddhism", "Christianity", "Hinduism"]
+    supported = ["Buddhism", "Christianity", "Hinduism", "Islam"]
     if religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {religion}")
 
@@ -224,7 +228,7 @@ def prepare_religion(religion: str):
 @app.get("/status/{religion}")
 def religion_status(religion: str):
     """Poll the load status of a specific religion."""
-    supported = ["Buddhism", "Christianity", "Hinduism"]
+    supported = ["Buddhism", "Christianity", "Hinduism", "Islam"]
     if religion not in supported:
         raise HTTPException(status_code=400, detail=f"Unsupported religion: {religion}")
 
