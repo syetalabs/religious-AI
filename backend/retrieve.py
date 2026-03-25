@@ -29,6 +29,11 @@ _RELIGION_PATHS = {
         "faiss": DATA_ROOT / "hinduism" / "faiss_index.bin",
         "db":    DATA_ROOT / "hinduism" / "chunks.db",
     },
+    "Islam": {
+        "dir":   DATA_ROOT / "islam",
+        "faiss": DATA_ROOT / "islam" / "faiss_index.bin",
+        "db":    DATA_ROOT / "islam" / "chunks.db",
+    },
 }
 
 MODEL_DIR = DATA_ROOT / "buddhism" / "onnx-model"   # shared model cache

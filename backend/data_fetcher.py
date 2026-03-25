@@ -23,6 +23,10 @@ _FILES = {
         ("hinduism/faiss_index.bin", "faiss_index.bin", False),
         ("hinduism/chunks.db",       "chunks.db",       False),
     ],
+    "islam": [
+        ("islam/faiss_index.bin", "faiss_index.bin", False),
+        ("islam/chunks.db",       "chunks.db",       False),
+    ],
 }
 
 # Old filenames that must be removed so retrieve.py never opens them
@@ -30,6 +34,7 @@ _STALE_FILES = {
     "buddhism":     ["faiss_index.bin", "chunks.db"],
     "christianity": ["faiss_index.bin", "chunks.db"],   # replaced by en-si-ta files
     "hinduism":     [],
+    "islam":        [],
 }
 
 
