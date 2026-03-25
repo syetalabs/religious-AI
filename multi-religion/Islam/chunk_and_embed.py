@@ -563,14 +563,40 @@ for item in tqdm(corpus, desc="Building chunks"):
     surah    = item.get("surah",    0)
     ayah     = item.get("ayah",     0)
     language = item.get("language", "en")
+    source   = item.get("source",   "quran")
 
     if not raw_text:
         continue
 
+    # ── Hadith entries: simple embed_text (no verse-context window needed) ────
+    if category == "Hadith":
+        preamble = ""
+        parts = [
+            f"Source: {section}. Religion: Islam. Hadith {ayah}.",
+            f"Hadith: {raw_text}",
+        ]
+        synonyms = _get_synonym_expansion(raw_text)
+        if synonyms:
+            parts.append(synonyms)
+
+        all_chunks.append({
+            "text":       raw_text,
+            "embed_text": " ".join(parts),
+            "book":       section,
+            "section":    section,
+            "category":   category,
+            "surah":      surah,
+            "ayah":       ayah,
+            "religion":   "Islam",
+            "language":   language,
+            "source":     source,
+        })
+        continue
+
+    # ── Quran entries: verse-level with neighbouring-verse context ────────────
     preamble = _get_topic_preamble(section)
 
-    # ── Build neighbouring-verse context ──────────────────────────────────────
-    siblings   = surah_verses[surah]           # all verses in this surah, sorted
+    siblings   = surah_verses[surah]
     idx        = next((i for i, v in enumerate(siblings)
                        if v.get("ayah") == ayah), None)
 
@@ -594,18 +620,14 @@ for item in tqdm(corpus, desc="Building chunks"):
         f"Quran {surah}:{ayah}."
     )
 
-    # Previous verse(s) as context prefix (lighter weight — no label)
     if prev_texts:
         parts.append("Context before: " + " ".join(prev_texts))
 
-    # The verse itself (labelled so the model weights it highest)
     parts.append(f"Verse: {raw_text}")
 
-    # Following verse(s) as context suffix
     if next_texts:
         parts.append("Context after: " + " ".join(next_texts))
 
-    # Synonym expansion for semantic coverage
     synonyms = _get_synonym_expansion(raw_text)
     if synonyms:
         parts.append(synonyms)
@@ -622,6 +644,7 @@ for item in tqdm(corpus, desc="Building chunks"):
         "ayah":       ayah,
         "religion":   "Islam",
         "language":   language,
+        "source":     source,
     })
 
 print(f"Total chunks produced: {len(all_chunks):,}  (1 chunk = 1 verse)")
@@ -654,18 +677,20 @@ con.executescript("""
         surah     INTEGER NOT NULL DEFAULT 0,
         ayah      INTEGER NOT NULL DEFAULT 0,
         religion  TEXT    NOT NULL DEFAULT 'Islam',
-        language  TEXT    NOT NULL DEFAULT 'en'
+        language  TEXT    NOT NULL DEFAULT 'en',
+        source    TEXT    NOT NULL DEFAULT 'quran'
     );
 
     CREATE INDEX idx_religion  ON chunks (religion);
     CREATE INDEX idx_book      ON chunks (book);
     CREATE INDEX idx_surah     ON chunks (surah);
     CREATE INDEX idx_category  ON chunks (category);
+    CREATE INDEX idx_source    ON chunks (source);
 """)
 
 con.executemany(
-    "INSERT INTO chunks (id, text, book, section, category, surah, ayah, religion, language) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO chunks (id, text, book, section, category, surah, ayah, religion, language, source) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
         (
             i,
@@ -677,6 +702,7 @@ con.executemany(
             c.get("ayah",     0),
             c.get("religion", "Islam"),
             c.get("language", "en"),
+            c.get("source",   "quran"),
         )
         for i, c in enumerate(all_chunks)
     ],
