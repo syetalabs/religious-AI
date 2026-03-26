@@ -147,7 +147,7 @@ Rules you must follow without exception:
   "I do not have enough reliable scriptural context to answer this accurately."
 - Use simple, clear, everyday language that is welcoming to newcomers.
 - Begin with the most human, relatable aspect of the teaching before going deeper.
-- Keep answers concise — 3 to 5 sentences unless the question requires more detail.
+- Keep answers concise — 3 to 5 sentences unless the question genuinely requires more detail.
 - Do not provide personal opinions or moral judgments.
 - Do not compare Islam with other religions.
 - Do not mix teachings from other traditions.
@@ -156,11 +156,13 @@ Rules you must follow without exception:
 - When referencing a source, ONLY mention a surah name or hadith collection if it appears in the [Source: ...] tags above. Never cite from memory.
 - Sources may be from the Quran (labelled with a surah name) or Hadith collections (Sahih al-Bukhari, Sahih Muslim, Sunan Abu Dawud, Sunan Ibn Majah, Muwatta Malik). Use the source label naturally when relevant.
 
-CRITICAL — Quoting rules:
-- Do NOT cite specific verse or hadith numbers (e.g. Quran 2:255, Bukhari 1) unless those exact references appear word-for-word in the provided context.
+CRITICAL — Quoting and citation rules:
+- Do NOT cite specific verse or hadith numbers (e.g. Quran 2:255, Bukhari 1, 17.110) unless those exact references appear word-for-word in the provided context.
+- Do NOT write inline parenthetical citations like (Ar-Ra'd), (Sunan Ibn Majah), or (17.110) after a quote or sentence. This is forbidden.
 - Do NOT cite or mention any surah or hadith collection name unless it appears in the [Source: ...] tags above.
 - Do NOT reproduce or paraphrase text not present in the provided context.
-- Never invent or recall verse references or hadith numbers from memory — only use what is explicitly in the context.""",
+- Never invent or recall verse references or hadith numbers from memory — only use what is explicitly in the context.
+- If you wish to reference a source, mention it naturally in the sentence (e.g. "As taught in Sahih al-Bukhari...") — never as a parenthetical at the end.""",
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -253,6 +255,12 @@ _OTHER_RELIGION_TERMS = {
         "buddha", "allah", "brahma", "vishnu", "shiva",
         "mosque", "synagogue",
     ],
+    "Islam": [
+        "buddhism", "christianity", "hinduism", "judaism", "sikhism",
+        "bible", "torah", "vedas", "gita", "tipitaka",
+        "buddha", "jesus", "brahma", "vishnu", "shiva", "moses",
+        "church", "temple", "synagogue",
+    ],
 }
 
 # ── Cross-religion INPUT detection ────────────────────────────────
@@ -278,6 +286,14 @@ _CROSS_RELIGION_QUERY_TERMS = {
         "sikhism", "sikh", "allah", "buddha", "vishnu", "brahma", "shiva",
         "prophet muhammad", "mohammed",
     ],
+    "Islam": [
+        "buddhism", "buddhist", "tipitaka",
+        "christianity", "christian", "bible",
+        "hinduism", "hindu", "vedas", "gita",
+        "judaism", "jewish", "torah",
+        "sikhism", "sikh",
+        "jesus", "buddha", "vishnu", "brahma", "shiva",
+    ],
 }
 
 # Patterns that explicitly ask what another religion says/teaches
@@ -298,6 +314,7 @@ _OWN_SCRIPTURE_NAMES = {
                     "mahabharata", "ramayana", "purana", "puranas"},
     "Buddhism":    {"tipitaka", "dhammapada", "pali canon", "nikayas"},
     "Christianity":{"bible", "new testament", "old testament", "gospel", "gospels"},
+    "Islam":       {"quran", "hadith", "sahih", "sunnah", "surah"},
 }
 
 _FALLBACK_MESSAGES = {
@@ -378,7 +395,9 @@ _GREETING_PATTERNS = re.compile(
     # Sinhala greetings
     r"ආයුබෝවන්|හෙලෝ|හායි|ශුභ\s*(උදෑසන|සවස|රාත්‍රී)|"
     # Tamil greetings
-    r"வணக்கம்|ஹலோ|ஹாய்|காலை\s*வணக்கம்|மாலை\s*வணக்கம்"
+    r"வணக்கம்|ஹலோ|ஹாய்|காலை\s*வணக்கம்|மாலை\s*வணக்கம்|"
+    # Islamic greetings
+    r"as-?salamu?\s*['']?alayk[uo]m|assalamu\s*alaikum|salam|wa\s*['']?alayk[uo]m\s*as-?salam"
     r")"
     r"[\s!.,]*$",
     re.IGNORECASE | re.UNICODE,
@@ -399,6 +418,11 @@ _GREETING_RESPONSES = {
         "en": "Hi! 🙏 Feel free to ask any question about Christianity.",
         "si": "ආයුබෝවන්! 🙏 ක්‍රිස්තියානි ධර්මය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න.",
         "ta": "வணக்கம்! 🙏 கிறிஸ்தவம் பற்றி எதுவும் கேட்கலாம்.",
+    },
+    "Islam": {
+        "en": "As-salamu alaykum! 🙏 Feel free to ask any question about Islam.",
+        "si": "ආයුබෝවන්! 🙏 ඉස්ලාම් ධර්මය පිළිබඳ ඕනෑම ප්‍රශ්නයක් අසන්න.",
+        "ta": "வணக்கம்! 🙏 இஸ்லாம் பற்றி எதுவும் கேட்கலாம்.",
     },
 }
 
@@ -434,7 +458,6 @@ _VERSE_REF_PATTERNS = {
         re.IGNORECASE,
     ),
     "Christianity": re.compile(
-        # ── English book names with chapter:verse ──────────────────────────
         r"\b(Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|"
         r"1\s*Samuel|2\s*Samuel|1\s*Kings|2\s*Kings|1\s*Chronicles|2\s*Chronicles|"
         r"Ezra|Nehemiah|Esther|Job|Psalms?|Proverbs?|Ecclesiastes|Song\s*of\s*Solomon|"
@@ -471,6 +494,15 @@ _VERSE_REF_PATTERNS = {
         r"ஏசாயா|எரேமியா|எசேக்கியேல்|தானியேல்"
         r")\s+\d+[:\.\s]\d+(?:-\d+)?",
         re.UNICODE,
+    ),
+    "Islam": re.compile(
+        # Quran chapter:verse  e.g. Quran 2:255, Al-Baqarah 2:255, Surah 17:110
+        r"\b(Quran|Qur'an|Surah|Al-[A-Za-z\-]+)\s*\d+[:\.\-]\d+\b"
+        # Bare numeric verse ref in parentheses  e.g. (17.110), (2:255)
+        r"|\(\s*\d{1,3}[:\.\-]\d{1,3}\s*\)"
+        # Hadith number references  e.g. Bukhari 1, Muslim 2056
+        r"|\b(Bukhari|Muslim|Abu\s*Dawud|Tirmidhi|Ibn\s*Majah|Nasa[ʾi'i]|Malik)\s*\d+\b",
+        re.IGNORECASE,
     ),
 }
 
@@ -517,6 +549,30 @@ _OPINION_SIGNALS = [
     r"\bi (think|believe|feel|personally|would say)\b",
     r"\bmy (view|opinion|take|perspective)\b",
 ]
+
+# Matches parenthetical inline citations the LLM appends to Islam answers,
+# e.g. (Ar-Ra'd), (Sunan Ibn Majah), (Sahih al-Bukhari), (17.110), (2:255)
+_ISLAM_INLINE_CITE_RE = re.compile(
+    r'\(\s*(?:'
+    # Surah names: Al-... or Ar-... or known names
+    r'Al-[A-Za-z\-]{2,30}|Ar-[A-Za-z\-]{2,20}|'
+    # Hadith collections
+    r'Sahih\s+al-Bukhari|Sahih\s+Muslim|Sunan\s+(?:Ibn\s+Majah|Abu\s+Dawud|Tirmidhi)|'
+    r'Muwatta\s+Malik|Ibn\s+Majah|Abu\s+Dawud|Tirmidhi|Bukhari|Muslim|'
+    # Bare numeric verse refs like (17.110) or (2:255)
+    r'\d{1,3}[:\.\-]\d{1,3}'
+    r')\s*\)',
+    re.IGNORECASE,
+)
+
+def _scrub_islam_inline_cites(text: str) -> str:
+    """Remove parenthetical inline citations that the LLM appends to Islam answers
+    from memory, e.g. (Ar-Ra'd), (Sunan Ibn Majah), (17.110)."""
+    cleaned = _ISLAM_INLINE_CITE_RE.sub("", text)
+    cleaned = re.sub(r'  +', ' ', cleaned)
+    # Fix spacing before punctuation left behind after removal
+    cleaned = re.sub(r'\s+([.,;])', r'\1', cleaned)
+    return cleaned.strip()
 
 # ════════════════════════════════════════════════════════════════
 # Moderation functions
@@ -2008,9 +2064,10 @@ def _build_english_answer(en_q: str, en_res: list[dict], religion: str) -> str:
     # ── Standard path (Buddhism, Christianity, non-enum Hinduism) ────────────
     fmt = _format_instructions(religion, _is_list_request(en_q), "en")
     ref = {
-        "Buddhism":    "Do NOT cite specific verse numbers (like SN 56.11)",
+        "Buddhism":     "Do NOT cite specific verse numbers (like SN 56.11)",
         "Christianity": "Do NOT cite specific verse numbers (like John 3:16)",
-        "Hinduism":    "Do NOT cite specific verse numbers (like BG 2.47)",
+        "Hinduism":     "Do NOT cite specific verse numbers (like BG 2.47)",
+        "Islam":        "Do NOT cite specific verse or hadith numbers (like Quran 2:255 or Bukhari 1)",
     }.get(religion, "Do NOT cite specific verse numbers")
     msg = (
         f"Scripture context:\n{ctx}\n\n"
@@ -2559,7 +2616,7 @@ def answer_question(
                 "warnings":       [reason_en],
             }
 
-        # Hinduism: no native Tamil chunks — use English retrieval + translate.
+        # Hinduism / Islam: English-only — use English retrieval + translate.
         if religion == "Hinduism":
             if _is_broad_hindu_question(en_query):
                 print("  [ta] Broad Hinduism question — returning redirect")
@@ -2569,6 +2626,33 @@ def answer_question(
                 }
             print("  [ta] Hinduism — using English context + translation")
             return _english_context_then_translate(question, en_query, religion, target_lang="ta")
+
+        if religion == "Islam":
+            print("  [ta] Islam — English only, returning English answer for Tamil query")
+            results = search(en_query, religion="Islam", language="en")
+            if not results:
+                return {
+                    "answer":         _FALLBACK_MESSAGES["en"]["no_context"],
+                    "sources":        [], "scores":  [],
+                    "flagged":        False, "low_confidence": True, "warnings": [],
+                }
+            results = _refine_results(results, "Islam")
+            raw = _build_english_answer(en_query, results, "Islam")
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+            raw = _trim_incomplete_sentence(raw)
+            raw = _scrub_question_echo(raw)
+            final_answer, warnings = moderate_output(raw, "", "Islam", "en")
+            final_answer = _scrub_question_echo(final_answer)
+            for r in results:
+                if not r.get("book"):
+                    r["book"] = (r.get("pitaka") or r.get("source") or "").strip()
+            disp = [r for r in results if r.get("book")] or results
+            src, scores_out = _unique_sources(disp)
+            return {
+                "answer": final_answer, "sources": src, "scores": scores_out,
+                "flagged": False, "low_confidence": False, "warnings": warnings,
+            }
 
         # For Christianity: first try native Tamil chunks from chunks-en-si-ta.db
         if religion == "Christianity":
@@ -2624,7 +2708,7 @@ def answer_question(
                 "warnings":       [reason_en],
             }
 
-        # Hinduism: no native Sinhala chunks — use English retrieval + translate.
+        # Hinduism / Islam: English-only — use English retrieval + translate.
         if religion == "Hinduism":
             if _is_broad_hindu_question(en_query):
                 print("  [si] Broad Hinduism question — returning redirect")
@@ -2634,6 +2718,33 @@ def answer_question(
                 }
             print("  [si] Hinduism — using English context + translation")
             return _english_context_then_translate(question, en_query, religion, target_lang="si")
+
+        if religion == "Islam":
+            print("  [si] Islam — English only, returning English answer for Sinhala query")
+            results = search(en_query, religion="Islam", language="en")
+            if not results:
+                return {
+                    "answer":         _FALLBACK_MESSAGES["en"]["no_context"],
+                    "sources":        [], "scores":  [],
+                    "flagged":        False, "low_confidence": True, "warnings": [],
+                }
+            results = _refine_results(results, "Islam")
+            raw = _build_english_answer(en_query, results, "Islam")
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+            raw = _trim_incomplete_sentence(raw)
+            raw = _scrub_question_echo(raw)
+            final_answer, warnings = moderate_output(raw, "", "Islam", "en")
+            final_answer = _scrub_question_echo(final_answer)
+            for r in results:
+                if not r.get("book"):
+                    r["book"] = (r.get("pitaka") or r.get("source") or "").strip()
+            disp = [r for r in results if r.get("book")] or results
+            src, scores_out = _unique_sources(disp)
+            return {
+                "answer": final_answer, "sources": src, "scores": scores_out,
+                "flagged": False, "low_confidence": False, "warnings": warnings,
+            }
 
         # Christianity: first try native Sinhala chunks from chunks-en-si-ta.db,
         # then fall back to the English-context + translate path.
@@ -2796,8 +2907,10 @@ def answer_question(
 
     final_answer, warnings = moderate_output(raw_answer, context, religion, lang)
     final_answer = _scrub_question_echo(final_answer)
-    if religion == "Hinduism":
+    if religion in ("Hinduism", "Islam"):
         final_answer = _scrub_scholarly_notation(final_answer)
+    if religion == "Islam":
+        final_answer = _scrub_islam_inline_cites(final_answer)
 
     # Patch missing book field so sources work for DB schemas without a book column
     # (e.g. Hinduism — falls back to pitaka/section label or source)
