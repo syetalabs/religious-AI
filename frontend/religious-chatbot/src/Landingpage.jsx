@@ -182,6 +182,18 @@ const ReligionSelectPage = ({ onSelect, bannerVisible }) => {
       `}</style>
 
       <div style={{ textAlign: "center", marginBottom: 56, animation: "fadeIn 0.6s ease" }}>
+        <img
+          src="/logo.png"
+          alt="Multi-Religious AI Logo"
+          style={{
+            width: 90,
+            height: 90,
+            borderRadius: "50%",
+            display: "block",
+            margin: "0 auto 24px",
+            boxShadow: "0 4px 24px rgba(0,0,0,0.4), 0 0 0 3px rgba(255,255,255,0.08)",
+          }}
+        />
         <div style={{ fontSize: 14, letterSpacing: 5, textTransform: "uppercase", color: "#8899bb", fontFamily: "'Cinzel', serif", marginBottom: 16 }}>
           Welcome to
         </div>
