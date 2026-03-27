@@ -4,21 +4,38 @@ Islam Data Loader  —  Comprehensive Islamic Knowledge Base
 Downloads and merges multiple Islamic text sources into quran_raw.json.
 
 Sources included:
-  1. Quran           — 6,236 verses (Sahih International, alquran.cloud)
-                       + Ibn Kathir tafsir per verse (spa5k CDN)
-  2. Sahih Bukhari   — ~7,563 hadiths  (fawazahmed0 CDN, eng-bukhari)
-  3. Sahih Muslim    — ~3,033 hadiths  (fawazahmed0 CDN, eng-muslim)
-  4. 40 Hadith Nawawi— 42 hadiths      (fawazahmed0 CDN, eng-nawawi40)
-  5. Sunan Abu Dawud — ~5,274 hadiths  (fawazahmed0 CDN, eng-abudawud)
-  6. Riyad as-Salihin— ~1,900 hadiths  (fawazahmed0 CDN, eng-riyadussalihin)
+  English:
+    1. Quran           — 6,236 verses (Sahih International, alquran.cloud)
+                         + Ibn Kathir tafsir per verse (spa5k CDN)
+    2. Sahih Bukhari   — ~7,563 hadiths  (fawazahmed0 CDN, eng-bukhari)
+    3. Sahih Muslim    — ~3,033 hadiths  (fawazahmed0 CDN, eng-muslim)
+    4. Sunan Abu Dawud — ~5,274 hadiths  (fawazahmed0 CDN, eng-abudawud)
+    5. Sunan Ibn Majah — ~4,341 hadiths  (fawazahmed0 CDN, eng-ibnmajah)
+    6. Muwatta Malik   — ~1,900 hadiths  (fawazahmed0 CDN, eng-malik)
+
+  Sinhala (sin):
+    7. Quran           — 6,236 verses    (fawazahmed0 CDN, sin-*)
+       NOTE: No Sinhala hadith collections exist on fawazahmed0/hadith-api.
+
+  Tamil (tam):
+    8. Quran           — 6,236 verses    (fawazahmed0 CDN, tam-*)
+    9. Sahih Bukhari   — ~7,563 hadiths  (fawazahmed0 CDN, tam-bukhari)
+       NOTE: Only Bukhari is available in Tamil on fawazahmed0/hadith-api.
 
 All sources are free, no API key required.
 
-Expected output size : ~35,000-50,000 KB  (comparable to other religions)
-Expected entry count : ~24,000+ passages
+Quran editions used (fawazahmed0/quran-api CDN bulk download):
+  Sinhala : sin-translationwmabdulhamee  (W.M. Abdul Hameed)
+  Tamil   : tam-janturstfoundat          (Jan Trust Foundation)
+            tam-abdulhameedbaqa          (Abdul Hameed Baqavi) — secondary fallback
+
+Bulk download URL chain (tried in order until one succeeds):
+  1. https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/{edition}.min.json
+  2. https://raw.githubusercontent.com/fawazahmed0/quran-api/1/editions/{edition}.min.json
+  3. Per-surah alquran.cloud  (e.g. https://api.alquran.cloud/v1/surah/{n}/sin.abdulhameed)
 
 Output:
-  data/quran_raw.json              — all entries (Quran + Hadith) for chunk_and_embed
+  data/quran_raw.json              — all entries (all languages) for chunk_and_embed
   data/sections/islam_*.json       — per-surah Quran section files (checkpoint)
   data/hadith/islam_hadith_*.json  — per-collection hadith files (checkpoint)
   data/checkpoint_islam.json       — download progress checkpoint
@@ -28,7 +45,9 @@ Usage:
   python data_loader.py --reset      # wipe everything, re-download all
   python data_loader.py --remerge    # re-merge existing files, no download
   python data_loader.py --patch      # retry surahs that returned 0 verses
-  python data_loader.py --force 2    # force re-download one surah by number
+  python data_loader.py --force 2    # force re-download one surah (en only)
+  python data_loader.py --force 2 --lang sin   # force re-download one surah for sinhala
+  python data_loader.py --force 2 --lang tam   # force re-download one surah for tamil
 """
 
 import argparse
@@ -61,7 +80,31 @@ HADITH_DIR.mkdir(parents=True, exist_ok=True)
 REQUEST_DELAY = 0.5
 TIMEOUT       = 60
 MAX_RETRIES   = 3
-GROUP_SIZE    = 1     # 1 verse per passage — chunk_and_embed handles context window
+GROUP_SIZE    = 1     # 1 verse per passage
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Languages to download
+# ─────────────────────────────────────────────────────────────────────────────
+# Each entry: (lang_code, quran_edition_id, display_label)
+# The fawazahmed0/quran-api bulk endpoint returns the full Quran in one JSON:
+#   https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/{edition}.min.json
+#
+# Sinhala editions confirmed in editions.json:
+#   sin-translationwmabdulhamee  (W.M. Abdul Hameed — most complete)
+# Tamil editions confirmed in editions.json:
+#   tam-johntrustbookshop        (John Trust Book Shop)
+#   tam-abdulhameedbaghavi       (alternative, also available)
+
+QURAN_EXTRA_LANGS: list[tuple[str, str, str, str]] = [
+    # (lang_code, fawaz_edition,                  display_label, alquran_cloud_edition)
+    ("sin", "sin-translationwmabdulhamee", "Sinhala", "sin.abdulhameed"),
+    ("tam", "tam-janturstfoundat",         "Tamil",   "ta.tamil"),
+]
+
+# Secondary fawaz edition to try if primary bulk download returns empty verses
+QURAN_EXTRA_FALLBACK_EDITION: dict[str, str] = {
+    "tam": "tam-abdulhameedbaqa",
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP session
@@ -81,25 +124,44 @@ _session.headers.update({
 # Source URLs
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Quran translation
+# English Quran (per-surah sources, used as fallback chain)
 _ALQURAN_CLOUD_URL = "https://api.alquran.cloud/v1/surah/{n}/en.sahih"
 _SEMARKETIR_URL    = "https://raw.githubusercontent.com/semarketir/quranjson/master/source/translation/en/en_translation_{n}.json"
 _QURANAPI_URL      = "https://quranapi.pages.dev/api/{n}.json"
 
-# Quran tafsir — Ibn Kathir English
+# fawazahmed0/quran-api  — bulk full-Quran download per edition (no auth)
+# Multiple mirrors tried in order; jsdelivr and raw.githubusercontent are independent domains
+_FAWAZ_QURAN_BULK_URLS = [
+    "https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1/editions/{edition}.min.json",
+    "https://raw.githubusercontent.com/fawazahmed0/quran-api/1/editions/{edition}.min.json",
+]
+
+# alquran.cloud per-surah endpoint — final fallback when bulk CDN is blocked
+# edition examples: "sin.abdulhameed", "ta.tamil"
+_ALQURAN_CLOUD_LANG_URL = "https://api.alquran.cloud/v1/surah/{n}/{edition}"
+
+# Quran tafsir — Ibn Kathir English (English only)
 _TAFSIR_CDN_URL       = "https://cdn.jsdelivr.net/gh/spa5k/tafsir_api@main/tafsir/en-tafisr-ibn-kathir/{surah}/{ayah}.json"
 _QURAN_COM_TAFSIR_URL = "https://api.quran.com/api/v4/tafsirs/169/by_ayah/{surah}:{ayah}"
 
-# Hadith — fawazahmed0 CDN (entire collection in one bulk JSON, no API key)
+# Hadith — fawazahmed0 CDN (entire collection in one bulk JSON)
 _HADITH_BASE = "https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/{edition}.min.json"
 
-# Collections: (edition_id, display_name, book_key)
-HADITH_COLLECTIONS = [
-    ("eng-bukhari",  "Sahih al-Bukhari",  "bukhari"),
-    ("eng-muslim",   "Sahih Muslim",      "muslim"),
-    ("eng-abudawud", "Sunan Abu Dawud",   "abudawud"),
-    ("eng-ibnmajah", "Sunan Ibn Majah",   "ibnmajah"),   # replaces nawawi40 (not on CDN)
-    ("eng-malik",    "Muwatta Malik",     "malik"),       # replaces riyadussalihin (not on CDN)
+# ─────────────────────────────────────────────────────────────────────────────
+# Hadith collections per language
+# Each entry: (edition_id, display_name, book_key, lang_code)
+# ─────────────────────────────────────────────────────────────────────────────
+
+HADITH_COLLECTIONS: list[tuple[str, str, str, str]] = [
+    # English
+    ("eng-bukhari",  "Sahih al-Bukhari",  "bukhari",  "en"),
+    ("eng-muslim",   "Sahih Muslim",      "muslim",   "en"),
+    ("eng-abudawud", "Sunan Abu Dawud",   "abudawud", "en"),
+    ("eng-ibnmajah", "Sunan Ibn Majah",   "ibnmajah", "en"),
+    ("eng-malik",    "Muwatta Malik",     "malik",    "en"),
+    # Tamil  (only Bukhari is available in Tamil on fawazahmed0/hadith-api)
+    ("tam-bukhari",  "Sahih al-Bukhari",  "bukhari",  "tam"),
+    # Sinhala — no hadith collections exist on fawazahmed0/hadith-api
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -252,7 +314,7 @@ def _get_json(url: str, timeout: int = TIMEOUT) -> dict | list | None:
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quran — per-source parsers
+# English Quran — per-source parsers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _parse_semarketir(data: dict) -> list[dict]:
@@ -283,7 +345,7 @@ def _parse_alquran_cloud(data: dict) -> list[dict]:
 
 def _parse_quranapi_pages(data: dict) -> list[dict]:
     english = data.get("english") or data.get("translation") or []
-    verses  = []
+    verses = []
     for i, text in enumerate(english, start=1):
         t = str(text).strip()
         if t:
@@ -291,37 +353,116 @@ def _parse_quranapi_pages(data: dict) -> list[dict]:
     return verses
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quran — tafsir fetcher
+# fawazahmed0 bulk Quran parser (Sinhala / Tamil / any language)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_fawaz_bulk(data: dict, surah_num: int) -> list[dict]:
+    """
+    fawazahmed0/quran-api bulk format:
+    {
+      "chapter": <int>,          # surah number (1-114)
+      "verse": {
+        "<ayah_str>": "<text>",
+        ...
+      }
+    }
+    The bulk file contains the FULL Quran (all surahs) as a list under "quran",
+    or as a direct flat mapping of "chapter:verse" keys.
+
+    Actual format discovered from the API:
+    {
+      "quran": [
+        { "chapter": 1, "verse": { "1": "text", "2": "text", ... } },
+        ...
+      ]
+    }
+    """
+    # Try top-level "quran" list (most common)
+    quran_list = data.get("quran")
+    if quran_list and isinstance(quran_list, list):
+        for chapter in quran_list:
+            if chapter.get("chapter") == surah_num:
+                verse_map = chapter.get("verse") or {}
+                verses = []
+                for k, v in verse_map.items():
+                    try:
+                        ayah = int(k)
+                        text = str(v).strip()
+                        if text:
+                            verses.append({"ayah": ayah, "text": text})
+                    except (ValueError, TypeError):
+                        continue
+                verses.sort(key=lambda x: x["ayah"])
+                return verses
+        return []
+
+    # Fallback: flat "chapter:verse" key format
+    verses = []
+    prefix = f"{surah_num}:"
+    for k, v in data.items():
+        if k.startswith(prefix):
+            try:
+                ayah = int(k.split(":")[1])
+                text = str(v).strip()
+                if text:
+                    verses.append({"ayah": ayah, "text": text})
+            except (ValueError, IndexError):
+                continue
+    if verses:
+        verses.sort(key=lambda x: x["ayah"])
+        return verses
+
+    return []
+
+
+# Cache for bulk downloads to avoid re-fetching the same file per surah
+_bulk_cache: dict[str, dict] = {}
+
+
+def _fetch_bulk_edition(edition: str) -> dict | None:
+    """
+    Download the full Quran for a given edition (cached).
+    Tries all mirrors in _FAWAZ_QURAN_BULK_URLS in order.
+    Returns None only if every mirror fails.
+    """
+    if edition in _bulk_cache:
+        return _bulk_cache[edition]
+    for url_template in _FAWAZ_QURAN_BULK_URLS:
+        url  = url_template.format(edition=edition)
+        print(f"    Trying: {url}", flush=True)
+        data = _get_json(url, timeout=120)
+        if data:
+            _bulk_cache[edition] = data
+            return data
+    return None
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Quran tafsir (English only)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_tafsir(surah_num: int, ayah_num: int) -> str:
-    """Fetch Ibn Kathir tafsir (English) for one verse. Returns '' on failure."""
-    url = _TAFSIR_CDN_URL.format(surah=surah_num, ayah=ayah_num)
+    url  = _TAFSIR_CDN_URL.format(surah=surah_num, ayah=ayah_num)
     data = _get_json(url)
     if data:
         text = (data.get("text") or data.get("tafsir") or "").strip()
         if text:
             text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text
-
-    url2 = _QURAN_COM_TAFSIR_URL.format(surah=surah_num, ayah=ayah_num)
+            return re.sub(r"\s+", " ", text).strip()
+    url2  = _QURAN_COM_TAFSIR_URL.format(surah=surah_num, ayah=ayah_num)
     data2 = _get_json(url2)
     if data2:
         tafsirs = data2.get("tafsirs") or []
         if tafsirs:
             text = (tafsirs[0].get("text") or "").strip()
             text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text
-
+            return re.sub(r"\s+", " ", text).strip()
     return ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Quran — fetch one surah (translation + tafsir per verse)
+# English Quran — fetch one surah (translation + tafsir per verse)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _fetch_surah(surah_num: int) -> tuple[list[dict], str]:
+def _fetch_surah_en(surah_num: int) -> tuple[list[dict], str]:
     sources = [
         ("semarketir",     _SEMARKETIR_URL.format(n=surah_num),    _parse_semarketir),
         ("alquran.cloud",  _ALQURAN_CLOUD_URL.format(n=surah_num), _parse_alquran_cloud),
@@ -339,88 +480,131 @@ def _fetch_surah(surah_num: int) -> tuple[list[dict], str]:
             return verses, source_name
     return [], ""
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sinhala / Tamil Quran — fetch one surah from fawazahmed0 bulk file
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _group_verses(verses: list[dict], group_size: int = GROUP_SIZE) -> list[dict]:
+def _parse_alquran_cloud_lang(data: dict) -> list[dict]:
+    """Parse alquran.cloud per-surah response for any non-English language."""
+    ayahs = (data.get("data") or {}).get("ayahs") or []
+    verses = []
+    for item in ayahs:
+        ayah = item.get("numberInSurah") or item.get("number")
+        text = str(item.get("text", "")).strip()
+        if ayah and text:
+            verses.append({"ayah": int(ayah), "text": text})
+    verses.sort(key=lambda x: x["ayah"])
+    return verses
+
+
+def _fetch_surah_lang(surah_num: int, edition: str, lang_label: str,
+                      alquran_edition: str = "") -> tuple[list[dict], str]:
     """
-    GROUP_SIZE=1: one verse per passage.
-    Stored text = "[ayah] <translation>\nTafsir: <commentary>"
+    Fetch one surah for a non-English language. Strategy:
+      1. Try fawazahmed0 bulk file (all mirrors in _FAWAZ_QURAN_BULK_URLS).
+      2. If bulk returned data but 0 verses, try secondary fawaz edition if configured.
+      3. Fall back to alquran.cloud per-surah request (different domain, avoids CDN blocks).
+    Returns (verses, source_name).
     """
+    # Step 1: bulk fawaz (mirrors tried inside _fetch_bulk_edition)
+    bulk = _fetch_bulk_edition(edition)
+    if bulk:
+        verses = _parse_fawaz_bulk(bulk, surah_num)
+        if verses:
+            return verses, f"fawaz/{edition}"
+
+    # Step 2: secondary fawaz edition (e.g. tam-abdulhameedbaqa for Tamil)
+    fallback_ed = QURAN_EXTRA_FALLBACK_EDITION.get(
+        next((lc for lc, ed, _, _ in QURAN_EXTRA_LANGS if ed == edition), ""), ""
+    )
+    if fallback_ed and fallback_ed != edition:
+        bulk2 = _fetch_bulk_edition(fallback_ed)
+        if bulk2:
+            verses = _parse_fawaz_bulk(bulk2, surah_num)
+            if verses:
+                return verses, f"fawaz/{fallback_ed}"
+
+    # Step 3: alquran.cloud per-surah (completely different domain)
+    if alquran_edition:
+        url  = _ALQURAN_CLOUD_LANG_URL.format(n=surah_num, edition=alquran_edition)
+        data = _get_json(url)
+        if data:
+            verses = _parse_alquran_cloud_lang(data)
+            if verses:
+                return verses, f"alquran.cloud/{alquran_edition}"
+
+    print(f"    [warn] {lang_label} Surah {surah_num}: all sources failed")
+    return [], ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Group verses into passages
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _group_verses(verses: list[dict], include_tafsir: bool = False,
+                  group_size: int = GROUP_SIZE) -> list[dict]:
     passages = []
     for i in range(0, len(verses), group_size):
         group      = verses[i : i + group_size]
         start_ayah = group[0]["ayah"]
-        parts = []
+        parts      = []
         for v in group:
             line   = f"[{v['ayah']}] {v['text']}"
-            tafsir = v.get("tafsir", "").strip()
-            if tafsir:
-                line += f"\nTafsir: {tafsir}"
+            if include_tafsir:
+                tafsir = v.get("tafsir", "").strip()
+                if tafsir:
+                    line += f"\nTafsir: {tafsir}"
             parts.append(line)
         passages.append({"ayah": start_ayah, "text": "  ".join(parts)})
     return passages
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Hadith — bulk download entire collection in one request
+# Hadith — bulk download entire collection
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_hadith_collection(edition: str, display_name: str) -> list[dict]:
-    """
-    Download the entire hadith collection as a single bulk JSON file.
-    fawazahmed0 CDN hosts complete collections — no pagination needed.
-    Returns list of normalised hadith dicts.
-    """
     url  = _HADITH_BASE.format(edition=edition)
     print(f"  Downloading {display_name} ({edition}) ...", flush=True)
     data = _get_json(url, timeout=120)
-
     if not data:
         print(f"  [warn] {display_name}: download failed")
         return []
-
     raw_hadiths = data.get("hadiths") or []
     if not raw_hadiths:
         print(f"  [warn] {display_name}: empty response")
         return []
-
     entries = []
     for h in raw_hadiths:
         text = str(h.get("text") or "").strip()
         if not text or len(text) < 20:
             continue
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-
+        text       = re.sub(r"<[^>]+>", " ", text)
+        text       = re.sub(r"\s+", " ", text).strip()
         hadith_num = h.get("hadithnumber") or h.get("number") or 0
         grades     = h.get("grades") or []
         grade      = grades[0].get("grade", "") if grades else ""
         book_info  = h.get("book") or {}
         book_name  = book_info.get("bookname") or book_info.get("arabicname") or ""
-
         entries.append({
             "hadith_number": hadith_num,
             "text":          text,
             "grade":         grade,
             "book_name":     book_name,
         })
-
     print(f"    -> {len(entries):,} hadiths loaded")
     return entries
 
 
-def _hadith_to_entry(h: dict, display_name: str, book_key: str) -> dict:
-    """Convert normalised hadith dict to the standard quran_raw.json entry format."""
+def _hadith_to_entry(h: dict, display_name: str, book_key: str, lang: str) -> dict:
     hadith_num = h["hadith_number"]
     text       = h["text"]
     grade      = h.get("grade", "")
     book_name  = h.get("book_name", "")
-
-    header = f"[Hadith {hadith_num}]"
+    header     = f"[Hadith {hadith_num}]"
     if book_name:
         header += f" {book_name}."
     if grade:
         header += f" Grade: {grade}."
     full_text = f"{header}\n{text}"
-
     return {
         "text":     full_text,
         "section":  display_name,
@@ -428,7 +612,7 @@ def _hadith_to_entry(h: dict, display_name: str, book_key: str) -> dict:
         "surah":    0,
         "ayah":     hadith_num,
         "religion": "Islam",
-        "language": "en",
+        "language": lang,
         "source":   book_key,
     }
 
@@ -436,12 +620,12 @@ def _hadith_to_entry(h: dict, display_name: str, book_key: str) -> dict:
 # File I/O helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _section_path(surah_num: int) -> Path:
-    return SECTIONS_DIR / f"islam_surah_{surah_num:03d}.json"
+def _section_path(surah_num: int, lang: str = "en") -> Path:
+    return SECTIONS_DIR / f"islam_{lang}_surah_{surah_num:03d}.json"
 
 
-def _hadith_path(book_key: str) -> Path:
-    return HADITH_DIR / f"islam_hadith_{book_key}.json"
+def _hadith_path(book_key: str, lang: str = "en") -> Path:
+    return HADITH_DIR / f"islam_hadith_{lang}_{book_key}.json"
 
 
 def _save_json(path: Path, data) -> None:
@@ -456,23 +640,36 @@ def _save_json(path: Path, data) -> None:
         Path(tmp).unlink(missing_ok=True)
 
 
-def _load_checkpoint() -> tuple[set[int], set[str], dict]:
+def _load_checkpoint() -> tuple[dict[str, set[int]], set[str], dict]:
+    """
+    Returns:
+      completed_surahs  : {lang_code -> set of completed surah numbers}
+      completed_hadiths : set of "{lang}_{book_key}" strings
+      stats             : dict
+    """
     if not CHECKPOINT_PATH.exists():
-        return set(), set(), {}
+        return {}, set(), {}
     try:
         cp = json.loads(CHECKPOINT_PATH.read_text(encoding="utf-8"))
+        raw_cs = cp.get("completed_surahs", {})
+        # Support old single-lang format: {"completed_surahs": [1,2,...]}
+        if isinstance(raw_cs, list):
+            raw_cs = {"en": raw_cs}
+        completed_surahs = {lang: set(int(x) for x in nums) for lang, nums in raw_cs.items()}
         return (
-            set(int(x) for x in cp.get("completed_surahs", [])),
+            completed_surahs,
             set(cp.get("completed_hadiths", [])),
             cp.get("stats", {}),
         )
     except Exception:
-        return set(), set(), {}
+        return {}, set(), {}
 
 
-def _save_checkpoint(completed_surahs: set[int], completed_hadiths: set[str], stats: dict):
+def _save_checkpoint(completed_surahs: dict[str, set[int]],
+                     completed_hadiths: set[str],
+                     stats: dict):
     _save_json(CHECKPOINT_PATH, {
-        "completed_surahs":  sorted(completed_surahs),
+        "completed_surahs":  {lang: sorted(nums) for lang, nums in completed_surahs.items()},
         "completed_hadiths": sorted(completed_hadiths),
         "stats":             stats,
     })
@@ -484,34 +681,40 @@ def _save_checkpoint(completed_surahs: set[int], completed_hadiths: set[str], st
 def merge_all() -> list[dict]:
     all_entries: list[dict] = []
 
-    # 1. Quran sections
-    for surah_num in range(1, 115):
-        p = _section_path(surah_num)
-        if not p.exists():
-            continue
-        try:
-            passages = json.loads(p.read_text(encoding="utf-8"))
-        except Exception as exc:
-            print(f"  [warn] {p.name}: {exc}")
-            continue
-        meta = SURAH_INFO.get(surah_num, {})
-        for passage in passages:
-            all_entries.append({
-                "text":     passage["text"],
-                "section":  meta.get("name", f"Surah {surah_num}"),
-                "category": meta.get("revelation", "Meccan"),
-                "surah":    surah_num,
-                "ayah":     passage["ayah"],
-                "religion": "Islam",
-                "language": "en",
-                "source":   "quran",
-            })
+    # 1. Quran sections (all languages)
+    all_lang_codes = ["en"] + [lc for lc, _, _, _ in QURAN_EXTRA_LANGS]
+    for lang in all_lang_codes:
+        lang_count = 0
+        for surah_num in range(1, 115):
+            p = _section_path(surah_num, lang)
+            if not p.exists():
+                continue
+            try:
+                passages = json.loads(p.read_text(encoding="utf-8"))
+            except Exception as exc:
+                print(f"  [warn] {p.name}: {exc}")
+                continue
+            meta = SURAH_INFO.get(surah_num, {})
+            for passage in passages:
+                all_entries.append({
+                    "text":     passage["text"],
+                    "section":  meta.get("name", f"Surah {surah_num}"),
+                    "category": meta.get("revelation", "Meccan"),
+                    "surah":    surah_num,
+                    "ayah":     passage["ayah"],
+                    "religion": "Islam",
+                    "language": lang,
+                    "source":   "quran",
+                })
+                lang_count += 1
+        if lang_count:
+            print(f"    Quran [{lang}]: {lang_count:,} passages")
 
     quran_count = len(all_entries)
 
     # 2. Hadith collections
-    for _, display_name, book_key in HADITH_COLLECTIONS:
-        p = _hadith_path(book_key)
+    for edition, display_name, book_key, lang in HADITH_COLLECTIONS:
+        p = _hadith_path(book_key, lang)
         if not p.exists():
             continue
         try:
@@ -519,8 +722,11 @@ def merge_all() -> list[dict]:
         except Exception as exc:
             print(f"  [warn] {p.name}: {exc}")
             continue
+        count = 0
         for h in hadiths:
-            all_entries.append(_hadith_to_entry(h, display_name, book_key))
+            all_entries.append(_hadith_to_entry(h, display_name, book_key, lang))
+            count += 1
+        print(f"    Hadith [{lang}] {display_name}: {count:,}")
 
     hadith_count = len(all_entries) - quran_count
     print(f"  Merged: {quran_count:,} Quran + {hadith_count:,} Hadith = {len(all_entries):,} total")
@@ -532,15 +738,24 @@ def merge_all() -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _probe_sources() -> None:
-    for name, url in [
+    probes = [
         ("semarketir",    _SEMARKETIR_URL.format(n=1)),
         ("alquran.cloud", _ALQURAN_CLOUD_URL.format(n=1)),
         ("quranapi",      _QURANAPI_URL.format(n=1)),
-    ]:
+    ]
+    for lang, edition, label, alquran_ed in QURAN_EXTRA_LANGS:
+        probes.append((f"jsdelivr/{lang}",
+                       _FAWAZ_QURAN_BULK_URLS[0].format(edition=edition)))
+        probes.append((f"rawgithub/{lang}",
+                       _FAWAZ_QURAN_BULK_URLS[1].format(edition=edition)))
+        if alquran_ed:
+            probes.append((f"alquran.cloud/{lang}",
+                           _ALQURAN_CLOUD_LANG_URL.format(n=1, edition=alquran_ed)))
+    for name, url in probes:
         print(f"  Probing {name} ... ", end="", flush=True)
         try:
-            resp = _session.get(url, timeout=10)
-            print("OK v" if resp.status_code == 200 else f"HTTP {resp.status_code}")
+            resp = _session.get(url, timeout=15)
+            print("OK" if resp.status_code == 200 else f"HTTP {resp.status_code}")
         except Exception as exc:
             print(f"failed ({exc})")
 
@@ -549,16 +764,16 @@ def _probe_sources() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _print_summary(all_entries: list[dict]) -> None:
-    by_source: dict[str, int] = {}
+    by_lang: dict[str, int] = {}
     for e in all_entries:
-        s = e.get("source", "unknown")
-        by_source[s] = by_source.get(s, 0) + 1
+        key = f"{e.get('language','?')}:{e.get('source','?')}"
+        by_lang[key] = by_lang.get(key, 0) + 1
     print(f"\n{'=' * 60}")
     print("  DOWNLOAD COMPLETE")
     print(f"  Total entries : {len(all_entries):,}")
-    print(f"\n  By source:")
-    for src, count in sorted(by_source.items(), key=lambda x: -x[1]):
-        print(f"    {src:<20} {count:>7,}")
+    print(f"\n  By language:source:")
+    for k, count in sorted(by_lang.items(), key=lambda x: -x[1]):
+        print(f"    {k:<30} {count:>7,}")
     print(f"\n  Output: {DATA_PATH}")
     print(f"{'=' * 60}")
 
@@ -569,61 +784,95 @@ def _print_summary(all_entries: list[dict]) -> None:
 def download_islam() -> list[dict]:
     print(f"\n{'=' * 60}")
     print("  Islam Comprehensive Download Pipeline")
-    print("  Quran (translation + Ibn Kathir tafsir)")
-    print("  + Sahih Bukhari, Sahih Muslim, 40 Nawawi,")
-    print("    Sunan Abu Dawud, Riyad as-Salihin")
+    print("  Languages: English | Sinhala | Tamil")
+    print("  Quran (EN + tafsir) + Quran (SIN, TAM)")
+    print("  + Hadith EN (Bukhari/Muslim/AbuDawud/IbnMajah/Malik)")
+    print("  + Hadith TAM (Bukhari only)")
     print(f"{'=' * 60}\n")
 
     _probe_sources()
 
     completed_surahs, completed_hadiths, stats = _load_checkpoint()
 
-    # ── Phase 1: Quran ───────────────────────────────────────────────────────
-    remaining = sorted(set(range(1, 115)) - completed_surahs)
-    if remaining:
-        print(f"\n[Phase 1] Quran — {len(remaining)} surahs remaining ...\n")
-        for surah_num in remaining:
+    # Ensure every language has an entry in the checkpoint dict
+    for lang in ["en"] + [lc for lc, _, _, _ in QURAN_EXTRA_LANGS]:
+        completed_surahs.setdefault(lang, set())
+
+    # ── Phase 1: English Quran (translation + tafsir) ────────────────────────
+    en_remaining = sorted(set(range(1, 115)) - completed_surahs["en"])
+    if en_remaining:
+        print(f"\n[Phase 1] English Quran — {len(en_remaining)} surahs remaining ...\n")
+        for surah_num in en_remaining:
             meta = SURAH_INFO[surah_num]
-            name = meta["name"]
-            rev  = meta["revelation"]
-
-            verses, source_used = _fetch_surah(surah_num)
-            passages = _group_verses(verses) if verses else []
-
+            name, rev = meta["name"], meta["revelation"]
+            verses, source_used = _fetch_surah_en(surah_num)
+            passages = _group_verses(verses, include_tafsir=True) if verses else []
             if passages:
-                _save_json(_section_path(surah_num), passages)
+                _save_json(_section_path(surah_num, "en"), passages)
             else:
-                print(f"  [warn] Surah {surah_num} ({name}): all sources failed")
-
-            completed_surahs.add(surah_num)
-            stats[f"surah_{surah_num}"] = {
+                print(f"  [warn] EN Surah {surah_num} ({name}): all sources failed")
+            completed_surahs["en"].add(surah_num)
+            stats[f"en_surah_{surah_num}"] = {
                 "name": name, "passages": len(passages),
                 "verses": len(verses), "source": source_used,
             }
             _save_checkpoint(completed_surahs, completed_hadiths, stats)
-
             status = f"{len(verses):>3}v -> {len(passages)}p  [{source_used}]" if verses else "EMPTY"
-            print(f"  [{surah_num:3d}/114] {name:<28} {rev:<8}  {status}")
+            print(f"  EN [{surah_num:3d}/114] {name:<28} {rev:<8}  {status}")
     else:
-        print("[Phase 1] Quran already complete v")
+        print("[Phase 1] English Quran already complete ✓")
 
-    # ── Phase 2: Hadith ──────────────────────────────────────────────────────
-    print(f"\n[Phase 2] Hadith collections ...\n")
-    for edition, display_name, book_key in HADITH_COLLECTIONS:
-        if book_key in completed_hadiths:
-            print(f"  {display_name}: already downloaded v")
+    # ── Phase 2: Sinhala & Tamil Quran ───────────────────────────────────────
+    for lang, edition, label in QURAN_EXTRA_LANGS:
+        remaining = sorted(set(range(1, 115)) - completed_surahs[lang])
+        if not remaining:
+            print(f"\n[Phase 2/{label}] Already complete ✓")
             continue
-        hadiths = _fetch_hadith_collection(edition, display_name)
+
+        print(f"\n[Phase 2/{label}] {label} Quran ({edition}) — {len(remaining)} surahs remaining ...")
+        # Pre-fetch the bulk file once for this edition
+        print(f"  Pre-loading bulk edition file ...", flush=True)
+        bulk = _fetch_bulk_edition(edition)
+        if not bulk:
+            print(f"  [error] Could not download bulk file for {edition} — skipping {label}")
+            continue
+        print(f"  Bulk file loaded. Processing surahs ...")
+
+        for surah_num in remaining:
+            meta = SURAH_INFO[surah_num]
+            name, rev = meta["name"], meta["revelation"]
+            verses, source_used = _fetch_surah_lang(surah_num, edition, label, alquran_ed)
+            passages = _group_verses(verses, include_tafsir=False) if verses else []
+            if passages:
+                _save_json(_section_path(surah_num, lang), passages)
+            else:
+                print(f"  [warn] {label} Surah {surah_num} ({name}): 0 verses extracted")
+            completed_surahs[lang].add(surah_num)
+            stats[f"{lang}_surah_{surah_num}"] = {
+                "name": name, "passages": len(passages), "verses": len(verses),
+            }
+            _save_checkpoint(completed_surahs, completed_hadiths, stats)
+            status = f"{len(verses):>3}v -> {len(passages)}p" if verses else "EMPTY"
+            print(f"  {label} [{surah_num:3d}/114] {name:<28} {rev:<8}  {status}")
+
+    # ── Phase 3: Hadith (all languages) ──────────────────────────────────────
+    print(f"\n[Phase 3] Hadith collections ...\n")
+    for edition, display_name, book_key, lang in HADITH_COLLECTIONS:
+        cp_key = f"{lang}_{book_key}"
+        if cp_key in completed_hadiths:
+            print(f"  [{lang}] {display_name}: already downloaded ✓")
+            continue
+        hadiths = _fetch_hadith_collection(edition, f"[{lang}] {display_name}")
         if hadiths:
-            _save_json(_hadith_path(book_key), hadiths)
-            completed_hadiths.add(book_key)
-            stats[f"hadith_{book_key}"] = {"count": len(hadiths)}
+            _save_json(_hadith_path(book_key, lang), hadiths)
+            completed_hadiths.add(cp_key)
+            stats[f"hadith_{lang}_{book_key}"] = {"count": len(hadiths)}
             _save_checkpoint(completed_surahs, completed_hadiths, stats)
         else:
-            print(f"  [warn] {display_name}: failed — re-run to retry")
+            print(f"  [warn] [{lang}] {display_name}: failed — re-run to retry")
 
-    # ── Phase 3: Merge ───────────────────────────────────────────────────────
-    print(f"\n[Phase 3] Merging all sources -> {DATA_PATH.name} ...")
+    # ── Phase 4: Merge ────────────────────────────────────────────────────────
+    print(f"\n[Phase 4] Merging all sources -> {DATA_PATH.name} ...")
     all_entries = merge_all()
     _print_summary(all_entries)
     return all_entries
@@ -633,7 +882,7 @@ def download_islam() -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download comprehensive Islam data")
+    parser = argparse.ArgumentParser(description="Download comprehensive Islam data (EN/SIN/TAM)")
     parser.add_argument("--reset",   action="store_true",
                         help="Clear all checkpoints and re-download everything")
     parser.add_argument("--patch",   action="store_true",
@@ -642,12 +891,14 @@ if __name__ == "__main__":
                         help="Re-merge existing section files, no download")
     parser.add_argument("--force",   metavar="SURAH", type=int,
                         help="Force re-download one surah (1-114)")
+    parser.add_argument("--lang",    metavar="LANG", default="en",
+                        help="Language for --force / --patch (en, sin, tam). Default: en")
     args = parser.parse_args()
 
     if args.reset:
         if CHECKPOINT_PATH.exists():
             CHECKPOINT_PATH.unlink()
-        removed = sum(1 for p in SECTIONS_DIR.glob("islam_surah_*.json") if p.unlink() or True)
+        removed = sum(1 for p in SECTIONS_DIR.glob("islam_*_surah_*.json") if p.unlink() or True)
         removed += sum(1 for p in HADITH_DIR.glob("islam_hadith_*.json") if p.unlink() or True)
         print(f"  [reset] Cleared checkpoint + {removed} section/hadith files.")
 
@@ -657,30 +908,38 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     elif args.force:
-        n = args.force
+        n    = args.force
+        lang = args.lang
         if not 1 <= n <= 114:
             print(f"  [error] Surah number must be 1-114 (got {n})")
             raise SystemExit(1)
         cs, ch, st = _load_checkpoint()
-        cs.discard(n)
-        st.pop(f"surah_{n}", None)
-        fp = _section_path(n)
+        cs.setdefault(lang, set()).discard(n)
+        st.pop(f"{lang}_surah_{n}", None)
+        fp = _section_path(n, lang)
         if fp.exists():
             fp.unlink()
         _save_checkpoint(cs, ch, st)
-        print(f"  [force] Queued surah {n} ({SURAH_INFO[n]['name']}) for re-download.")
+        print(f"  [force] Queued surah {n} ({SURAH_INFO[n]['name']}) [{lang}] for re-download.")
 
     elif args.patch:
+        lang     = args.lang
         cs, ch, st = _load_checkpoint()
-        patched = [int(k.replace("surah_", "")) for k, v in st.items()
-                   if k.startswith("surah_") and isinstance(v, dict) and v.get("passages", 0) == 0]
+        patched  = [
+            int(k.replace(f"{lang}_surah_", ""))
+            for k, v in st.items()
+            if k.startswith(f"{lang}_surah_") and isinstance(v, dict) and v.get("passages", 0) == 0
+        ]
         for n in patched:
-            cs.discard(n)
-            st.pop(f"surah_{n}", None)
-            fp = _section_path(n)
+            cs.setdefault(lang, set()).discard(n)
+            st.pop(f"{lang}_surah_{n}", None)
+            fp = _section_path(n, lang)
             if fp.exists():
                 fp.unlink()
         _save_checkpoint(cs, ch, st)
-        print(f"  [patch] Queued {len(patched)} empty surahs: {patched}" if patched else "  [patch] Nothing to patch.")
+        print(
+            f"  [patch] [{lang}] Queued {len(patched)} empty surahs: {patched}"
+            if patched else f"  [patch] [{lang}] Nothing to patch."
+        )
 
     download_islam()
