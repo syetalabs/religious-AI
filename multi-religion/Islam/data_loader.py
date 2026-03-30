@@ -358,56 +358,66 @@ def _parse_quranapi_pages(data: dict) -> list[dict]:
 
 def _parse_fawaz_bulk(data: dict, surah_num: int) -> list[dict]:
     """
-    fawazahmed0/quran-api bulk format:
-    {
-      "chapter": <int>,          # surah number (1-114)
-      "verse": {
-        "<ayah_str>": "<text>",
-        ...
-      }
-    }
-    The bulk file contains the FULL Quran (all surahs) as a list under "quran",
-    or as a direct flat mapping of "chapter:verse" keys.
+    Parse a fawazahmed0/quran-api bulk edition file for one surah.
 
-    Actual format discovered from the API:
-    {
-      "quran": [
-        { "chapter": 1, "verse": { "1": "text", "2": "text", ... } },
-        ...
-      ]
-    }
+    Handles all known response formats:
+
+    Format B — standard fawaz bulk (most editions):
+        { "quran": [ { "chapter": 1, "verse": { "1": "text", "2": "text", ... } }, ... ] }
+
+    Format C — malformed/placeholder bulk (some Tamil editions):
+        { "quran": [ { "chapter": 1, "verse": { "1": 1, "2": 2, ... } } ] }
+        Verse values are ints, not text. Detected and returns [] so fallback runs.
+
+    Format D — flat key map:
+        { "1:1": "text", "1:2": "text", ... }
+
+    Returns [] on any format that contains no usable text, triggering the
+    alquran.cloud per-surah fallback in _fetch_surah_lang.
     """
-    # Try top-level "quran" list (most common)
+    # Format B / C: top-level "quran" list
     quran_list = data.get("quran")
     if quran_list and isinstance(quran_list, list):
         for chapter in quran_list:
+            if not isinstance(chapter, dict):
+                continue
             if chapter.get("chapter") == surah_num:
                 verse_map = chapter.get("verse") or {}
+                if not isinstance(verse_map, dict):
+                    return []  # unexpected structure
                 verses = []
                 for k, v in verse_map.items():
+                    # Format C guard: skip entries where value is not a string
+                    if not isinstance(v, str):
+                        return []  # whole edition is non-text; bail immediately
+                    text = v.strip()
+                    if not text:
+                        continue
                     try:
                         ayah = int(k)
-                        text = str(v).strip()
-                        if text:
-                            verses.append({"ayah": ayah, "text": text})
                     except (ValueError, TypeError):
                         continue
+                    verses.append({"ayah": ayah, "text": text})
                 verses.sort(key=lambda x: x["ayah"])
                 return verses
         return []
 
-    # Fallback: flat "chapter:verse" key format
+    # Format D: flat "chapter:verse" key map  e.g. {"1:1": "text", ...}
     verses = []
     prefix = f"{surah_num}:"
     for k, v in data.items():
-        if k.startswith(prefix):
-            try:
-                ayah = int(k.split(":")[1])
-                text = str(v).strip()
-                if text:
-                    verses.append({"ayah": ayah, "text": text})
-            except (ValueError, IndexError):
-                continue
+        if not isinstance(k, str) or not k.startswith(prefix):
+            continue
+        if not isinstance(v, str):
+            continue
+        text = v.strip()
+        if not text:
+            continue
+        try:
+            ayah = int(k.split(":")[1])
+        except (ValueError, IndexError):
+            continue
+        verses.append({"ayah": ayah, "text": text})
     if verses:
         verses.sort(key=lambda x: x["ayah"])
         return verses
@@ -429,10 +439,11 @@ def _fetch_bulk_edition(edition: str) -> dict | None:
         return _bulk_cache[edition]
     for url_template in _FAWAZ_QURAN_BULK_URLS:
         url  = url_template.format(edition=edition)
-        print(f"    Trying: {url}", flush=True)
+        print(f"    Trying bulk: {url}", flush=True)
         data = _get_json(url, timeout=120)
         if data:
             _bulk_cache[edition] = data
+            print(f"    Bulk loaded: {url}")
             return data
     return None
 
@@ -799,6 +810,11 @@ def download_islam() -> list[dict]:
         completed_surahs.setdefault(lang, set())
 
     # ── Phase 1: English Quran (translation + tafsir) ────────────────────────
+    # Cross-check checkpoint against actual files on disk so a partial/wiped
+    # data/sections directory doesn't silently skip re-download.
+    for n in list(completed_surahs["en"]):
+        if not _section_path(n, "en").exists():
+            completed_surahs["en"].discard(n)  # file missing — re-queue
     en_remaining = sorted(set(range(1, 115)) - completed_surahs["en"])
     if en_remaining:
         print(f"\n[Phase 1] English Quran — {len(en_remaining)} surahs remaining ...\n")
@@ -823,7 +839,11 @@ def download_islam() -> list[dict]:
         print("[Phase 1] English Quran already complete ✓")
 
     # ── Phase 2: Sinhala & Tamil Quran ───────────────────────────────────────
-    for lang, edition, label in QURAN_EXTRA_LANGS:
+    for lang, edition, label, alquran_ed in QURAN_EXTRA_LANGS:
+        # Cross-check checkpoint against actual files on disk
+        for n in list(completed_surahs[lang]):
+            if not _section_path(n, lang).exists():
+                completed_surahs[lang].discard(n)
         remaining = sorted(set(range(1, 115)) - completed_surahs[lang])
         if not remaining:
             print(f"\n[Phase 2/{label}] Already complete ✓")
@@ -834,9 +854,9 @@ def download_islam() -> list[dict]:
         print(f"  Pre-loading bulk edition file ...", flush=True)
         bulk = _fetch_bulk_edition(edition)
         if not bulk:
-            print(f"  [error] Could not download bulk file for {edition} — skipping {label}")
-            continue
-        print(f"  Bulk file loaded. Processing surahs ...")
+            print(f"  [warn] Bulk CDN unavailable for {edition}. Will use alquran.cloud per-surah fallback ({alquran_ed}).")
+        else:
+            print(f"  Bulk file loaded. Processing surahs ...")
 
         for surah_num in remaining:
             meta = SURAH_INFO[surah_num]
