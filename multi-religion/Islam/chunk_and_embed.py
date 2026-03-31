@@ -1,29 +1,42 @@
 """
-chunk_and_embed.py  —  Islam / Quran (English)
+chunk_and_embed.py  —  Islam  (English + Sinhala + Tamil)
 
 Reads:  data/quran_raw.json
 Writes:
-  data/chunks.json          (backup — all chunk metadata without embed_text)
-  data/chunks.db            (SQLite — runtime retrieval store)
-  data/embeddings.npy       (numpy backup)
-  data/faiss_index.bin      (FAISS index — runtime similarity search)
+  data/chunks-en-si-ta.json        (backup — all chunk metadata without embed_text)
+  data/chunks-en-si-ta.db          (SQLite — runtime retrieval store, all languages)
+  data/embeddings-en-si-ta.npy     (numpy backup)
+  data/faiss_index-en-si-ta.bin    (FAISS index — runtime similarity search)
 
-Each entry in quran_raw.json must have:
+quran_raw.json entry schema:
   {
-    "text":     "<passage text — 5 grouped verses with [ayah] prefixes>",
-    "section":  "<surah name>",     e.g. "Al-Baqarah"
-    "category": "<Meccan|Medinan>",
-    "surah":    2,
-    "ayah":     1,
+    "text":     "<passage text>",
+    "section":  "<surah name | hadith collection name>",
+    "category": "<Meccan | Medinan | Hadith>",
+    "surah":    <int>,
+    "ayah":     <int>,
     "religion": "Islam",
-    "language": "en"
+    "language": "en" | "sin" | "tam",
+    "source":   "quran" | "bukhari" | "muslim" | ...
   }
+
+Embedding strategy per language:
+  English  — full preamble + context window + synonym expansion
+  Sinhala  — structural header + verse text only
+             (no English preamble; the native script carries its own semantics)
+  Tamil    — structural header + verse text only (same rationale)
+  Hadith   — structural header + hadith text + synonym expansion (all languages)
+
+The model (paraphrase-multilingual-MiniLM-L12-v2) is multilingual:
+it maps Sinhala, Tamil, and English into the same vector space, so
+cross-language semantic search works out of the box.
 """
 
 import json
 import sqlite3
 import numpy as np
 import faiss
+from collections import defaultdict
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
@@ -36,25 +49,26 @@ BASE_DIR        = Path(__file__).parent
 DATA_DIR        = BASE_DIR / "data"
 
 CORPUS_PATH     = DATA_DIR / "quran_raw.json"
-CHUNKS_PATH     = DATA_DIR / "chunks.json"
-CHUNKS_DB_PATH  = DATA_DIR / "chunks.db"
-EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"
-FAISS_PATH      = DATA_DIR / "faiss_index.bin"
+CHUNKS_PATH     = DATA_DIR / "chunks-en-si-ta.json"
+CHUNKS_DB_PATH  = DATA_DIR / "chunks-en-si-ta.db"
+EMBEDDINGS_PATH = DATA_DIR / "embeddings-en-si-ta.npy"
+FAISS_PATH      = DATA_DIR / "faiss_index-en-si-ta.bin"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Settings
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Chunking is intentionally bypassed — each verse is stored as its own chunk.
-# Neighbouring verse context is injected into embed_text only (not stored text),
-# so FAISS finds verses semantically while retrieval returns the exact verse.
-CONTEXT_WINDOW = 2      # number of surrounding verses to inject into embed_text
-                        # (2 = 1 verse before + 1 verse after)
-MODEL_NAME    = "all-MiniLM-L6-v2"
+CONTEXT_WINDOW = 2   # neighbouring verses injected into embed_text (±2)
+
+# Multilingual model — maps EN, SIN, TAM into the same 384-dim vector space.
+# Swap to "paraphrase-multilingual-mpnet-base-v2" for higher quality (slower).
+MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+
+# Languages present in quran_raw.json
+ALL_LANGS = {"en", "sin", "tam"}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TOPIC PREAMBLE MAP
-# Keyed by surah name substring. Improves FAISS retrieval for common topics.
+# TOPIC PREAMBLE MAP  (English only — injected for EN entries)
 # ─────────────────────────────────────────────────────────────────────────────
 
 TOPIC_PREAMBLES: list[tuple[str, str]] = [
@@ -330,17 +344,15 @@ TOPIC_PREAMBLES: list[tuple[str, str]] = [
 
 def _get_topic_preamble(section: str) -> str:
     section_lower = section.lower()
-    best_match = ""
-    best_len   = 0
+    best_match, best_len = "", 0
     for key, preamble in TOPIC_PREAMBLES:
         if key.lower() in section_lower and len(key) > best_len:
-            best_match = preamble.strip()
-            best_len   = len(key)
+            best_match, best_len = preamble.strip(), len(key)
     return best_match
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SYNONYM EXPANSION MAP
+# SYNONYM EXPANSION MAP  (English — injected for EN entries only)
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYNONYM_EXPANSIONS: list[tuple[list[str], str]] = [
@@ -514,47 +526,43 @@ def _get_synonym_expansion(text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("=" * 60)
-print("  Islam Quran Chunk & Embed Pipeline")
+print("  Islam Chunk & Embed — English + Sinhala + Tamil")
 print("=" * 60)
 
 print(f"\nLoading corpus from {CORPUS_PATH.name} ...")
 corpus: list[dict] = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
 print(f"Loaded {len(corpus):,} passage entries")
 
-by_category: dict[str, int] = {}
-by_surah:    dict[str, int] = {}
+# Summary by language × source
+by_lang_src: dict[str, int] = {}
 for item in corpus:
-    cat   = item.get("category", "Unknown")
-    surah = item.get("section",  "Unknown")
-    by_category[cat]   = by_category.get(cat, 0) + 1
-    by_surah[surah]    = by_surah.get(surah, 0) + 1
-
-print(f"\n  By category:")
-for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
-    print(f"    {cat:<12} {count:>6,} passages")
-print(f"\n  Surahs represented: {len(by_surah)}")
+    key = f"{item.get('language','?')}:{item.get('source','?')}"
+    by_lang_src[key] = by_lang_src.get(key, 0) + 1
+print(f"\n  By language:source:")
+for k, cnt in sorted(by_lang_src.items(), key=lambda x: -x[1]):
+    print(f"    {k:<28} {cnt:>7,}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Build verse-level chunks with neighbouring-verse context in embed_text
-# ─────────────────────────────────────────────────────────────────────────────
-# Strategy:
-#   stored text  = the single verse  (precise retrieval)
-#   embed_text   = preamble + prev verse(s) + THIS verse + next verse(s) + synonyms
-#                  (rich semantic embedding so FAISS finds it by topic/theme)
-# This mirrors how Bible pipelines work: 1 chunk = 1 verse, ~6 236 total.
+# Group corpus by (language, surah) for context-window look-ups
 # ─────────────────────────────────────────────────────────────────────────────
 
-print(f"\n--- Building verse-level chunks (context window ±{CONTEXT_WINDOW}) ---")
+# surah_verses[(lang, surah_num)] = sorted list of verse entries
+surah_verses: dict[tuple[str, int], list[dict]] = defaultdict(list)
+for item in corpus:
+    lang  = item.get("language", "en")
+    surah = item.get("surah", 0)
+    if item.get("category") != "Hadith" and surah > 0:
+        surah_verses[(lang, surah)].append(item)
+
+for key in surah_verses:
+    surah_verses[key].sort(key=lambda x: x.get("ayah", 0))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build chunks
+# ─────────────────────────────────────────────────────────────────────────────
+
+print(f"\n--- Building chunks (context window ±{CONTEXT_WINDOW}) ---")
 all_chunks: list[dict] = []
-
-# Group corpus by surah so we can look up neighbours within the same surah
-from collections import defaultdict
-surah_verses: dict[int, list[dict]] = defaultdict(list)
-for item in corpus:
-    surah_verses[item.get("surah", 0)].append(item)
-# Sort each surah's verses by ayah number
-for num in surah_verses:
-    surah_verses[num].sort(key=lambda x: x.get("ayah", 0))
 
 for item in tqdm(corpus, desc="Building chunks"):
     raw_text = item.get("text", "").strip()
@@ -568,16 +576,18 @@ for item in tqdm(corpus, desc="Building chunks"):
     if not raw_text:
         continue
 
-    # ── Hadith entries: simple embed_text (no verse-context window needed) ────
+    # ── Hadith ────────────────────────────────────────────────────────────────
     if category == "Hadith":
-        preamble = ""
         parts = [
-            f"Source: {section}. Religion: Islam. Hadith {ayah}.",
+            f"Source: {section}. Religion: Islam. Language: {language}. "
+            f"Hadith {ayah}.",
             f"Hadith: {raw_text}",
         ]
-        synonyms = _get_synonym_expansion(raw_text)
-        if synonyms:
-            parts.append(synonyms)
+        # Synonym expansion only meaningful for English hadith
+        if language == "en":
+            synonyms = _get_synonym_expansion(raw_text)
+            if synonyms:
+                parts.append(synonyms)
 
         all_chunks.append({
             "text":       raw_text,
@@ -593,15 +603,13 @@ for item in tqdm(corpus, desc="Building chunks"):
         })
         continue
 
-    # ── Quran entries: verse-level with neighbouring-verse context ────────────
-    preamble = _get_topic_preamble(section)
+    # ── Quran verse ───────────────────────────────────────────────────────────
+    siblings = surah_verses.get((language, surah), [])
+    idx = next((i for i, v in enumerate(siblings)
+                if v.get("ayah") == ayah), None)
 
-    siblings   = surah_verses[surah]
-    idx        = next((i for i, v in enumerate(siblings)
-                       if v.get("ayah") == ayah), None)
-
-    prev_texts = []
-    next_texts = []
+    prev_texts: list[str] = []
+    next_texts: list[str] = []
     if idx is not None:
         for offset in range(1, CONTEXT_WINDOW + 1):
             if idx - offset >= 0:
@@ -609,34 +617,44 @@ for item in tqdm(corpus, desc="Building chunks"):
             if idx + offset < len(siblings):
                 next_texts.append(siblings[idx + offset].get("text", "").strip())
 
-    # ── Assemble embed_text ───────────────────────────────────────────────────
     parts = []
 
-    if preamble:
-        parts.append(preamble)
+    if language == "en":
+        # English: full preamble + synonym expansion
+        preamble = _get_topic_preamble(section)
+        if preamble:
+            parts.append(preamble)
+        parts.append(
+            f"Surah: {section}. Revelation: {category}. Religion: Islam. "
+            f"Language: English. Quran {surah}:{ayah}."
+        )
+        if prev_texts:
+            parts.append("Context before: " + " ".join(prev_texts))
+        parts.append(f"Verse: {raw_text}")
+        if next_texts:
+            parts.append("Context after: " + " ".join(next_texts))
+        synonyms = _get_synonym_expansion(raw_text)
+        if synonyms:
+            parts.append(synonyms)
 
-    parts.append(
-        f"Surah: {section}. Revelation: {category}. Religion: Islam. "
-        f"Quran {surah}:{ayah}."
-    )
-
-    if prev_texts:
-        parts.append("Context before: " + " ".join(prev_texts))
-
-    parts.append(f"Verse: {raw_text}")
-
-    if next_texts:
-        parts.append("Context after: " + " ".join(next_texts))
-
-    synonyms = _get_synonym_expansion(raw_text)
-    if synonyms:
-        parts.append(synonyms)
-
-    embed_text = " ".join(parts)
+    else:
+        # Sinhala / Tamil: structural header + context window in native script.
+        # No English preamble — the multilingual model handles the language
+        # natively; injecting English noise would hurt cross-lingual alignment.
+        lang_label = {"sin": "Sinhala", "tam": "Tamil"}.get(language, language)
+        parts.append(
+            f"Surah: {section}. Revelation: {category}. Religion: Islam. "
+            f"Language: {lang_label}. Quran {surah}:{ayah}."
+        )
+        if prev_texts:
+            parts.append(" ".join(prev_texts))
+        parts.append(raw_text)
+        if next_texts:
+            parts.append(" ".join(next_texts))
 
     all_chunks.append({
-        "text":       raw_text,        # single clean verse — what gets returned
-        "embed_text": embed_text,      # rich context — what gets embedded
+        "text":       raw_text,
+        "embed_text": " ".join(parts),
         "book":       section,
         "section":    section,
         "category":   category,
@@ -647,18 +665,18 @@ for item in tqdm(corpus, desc="Building chunks"):
         "source":     source,
     })
 
-print(f"Total chunks produced: {len(all_chunks):,}  (1 chunk = 1 verse)")
+print(f"Total chunks produced: {len(all_chunks):,}")
 
-# Chunk count by surah
-chunk_by_surah: dict[str, int] = {}
+# Summary by language
+by_lang: dict[str, int] = {}
 for c in all_chunks:
-    chunk_by_surah[c["section"]] = chunk_by_surah.get(c["section"], 0) + 1
-print(f"\n  Verses by surah (top 20):")
-for s, count in sorted(chunk_by_surah.items(), key=lambda x: -x[1])[:20]:
-    print(f"    {s:<28} {count:>5,}")
+    by_lang[c["language"]] = by_lang.get(c["language"], 0) + 1
+print(f"\n  Chunks by language:")
+for lang, cnt in sorted(by_lang.items()):
+    print(f"    {lang:<6} {cnt:>8,}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SQLite
+# SQLite  — chunks-en-si-ta.db
 # ─────────────────────────────────────────────────────────────────────────────
 
 print(f"\n--- Building SQLite DB: {CHUNKS_DB_PATH.name} ---")
@@ -682,14 +700,18 @@ con.executescript("""
     );
 
     CREATE INDEX idx_religion  ON chunks (religion);
+    CREATE INDEX idx_language  ON chunks (language);
     CREATE INDEX idx_book      ON chunks (book);
     CREATE INDEX idx_surah     ON chunks (surah);
     CREATE INDEX idx_category  ON chunks (category);
     CREATE INDEX idx_source    ON chunks (source);
+    CREATE INDEX idx_lang_src  ON chunks (language, source);
+    CREATE INDEX idx_lang_cat  ON chunks (language, category);
 """)
 
 con.executemany(
-    "INSERT INTO chunks (id, text, book, section, category, surah, ayah, religion, language, source) "
+    "INSERT INTO chunks "
+    "(id, text, book, section, category, surah, ayah, religion, language, source) "
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [
         (
@@ -708,12 +730,21 @@ con.executemany(
     ],
 )
 con.commit()
+
+# Row counts per language in DB
+print(f"  DB row counts per language:")
+for lang, cnt in sorted(by_lang.items()):
+    row = con.execute(
+        "SELECT COUNT(*) FROM chunks WHERE language=?", (lang,)
+    ).fetchone()
+    print(f"    {lang:<6} {row[0]:>8,}")
+
 con.close()
 
 db_mb = CHUNKS_DB_PATH.stat().st_size / 1_048_576
 print(f"Saved {CHUNKS_DB_PATH.name}  ({db_mb:.1f} MB, {len(all_chunks):,} rows)")
 
-# chunks.json backup (no embed_text)
+# Backup JSON (no embed_text)
 CHUNKS_PATH.write_text(
     json.dumps(
         [{k: v for k, v in c.items() if k != "embed_text"} for c in all_chunks],
@@ -724,10 +755,11 @@ CHUNKS_PATH.write_text(
 print(f"Saved {CHUNKS_PATH.name}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Embeddings
+# Embeddings  (multilingual model)
 # ─────────────────────────────────────────────────────────────────────────────
 
-print(f"\n--- Generating embeddings with {MODEL_NAME} ---")
+print(f"\n--- Generating embeddings with '{MODEL_NAME}' ---")
+print(f"    (multilingual: EN + SIN + TAM in one shared vector space)")
 model = SentenceTransformer(MODEL_NAME)
 
 embeddings: np.ndarray = model.encode(
@@ -741,7 +773,7 @@ np.save(EMBEDDINGS_PATH, embeddings)
 print(f"Saved {EMBEDDINGS_PATH.name}  shape={embeddings.shape}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FAISS index
+# FAISS index  — faiss_index-en-si-ta.bin
 # ─────────────────────────────────────────────────────────────────────────────
 
 print(f"\n--- Building FAISS index ---")
@@ -749,7 +781,7 @@ faiss.normalize_L2(embeddings)
 index = faiss.IndexFlatIP(embeddings.shape[1])
 index.add(embeddings)
 faiss.write_index(index, str(FAISS_PATH))
-print(f"Saved {FAISS_PATH.name}  ({index.ntotal:,} vectors)")
+print(f"Saved {FAISS_PATH.name}  ({index.ntotal:,} vectors, dim={embeddings.shape[1]})")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Final summary
@@ -758,8 +790,13 @@ print(f"Saved {FAISS_PATH.name}  ({index.ntotal:,} vectors)")
 print("\n" + "=" * 60)
 print("  PIPELINE COMPLETE")
 print("=" * 60)
-print(f"\n  Input passages (quran_raw.json) : {len(corpus):,}")
-print(f"  Total chunks embedded           : {len(all_chunks):,}")
+print(f"\n  Input passages  : {len(corpus):,}")
+print(f"  Total chunks    : {len(all_chunks):,}")
+print(f"\n  Chunks by language:")
+for lang, cnt in sorted(by_lang.items()):
+    label = {"en": "English", "sin": "Sinhala", "tam": "Tamil"}.get(lang, lang)
+    print(f"    {label:<10} {cnt:>8,}")
+
 print(f"\n  Output files:")
 for path, note in [
     (CHUNKS_DB_PATH,  "<-- upload to HuggingFace / runtime"),
@@ -768,12 +805,13 @@ for path, note in [
     (CHUNKS_PATH,     "<-- local backup"),
 ]:
     mb = path.stat().st_size / 1_048_576
-    print(f"    {path.name:<32} {mb:>7.1f} MB   {note}")
+    print(f"    {path.name:<40} {mb:>7.1f} MB   {note}")
 
 print(f"\n  Chunks by category:")
 chunk_by_cat: dict[str, int] = {}
 for c in all_chunks:
     chunk_by_cat[c["category"]] = chunk_by_cat.get(c["category"], 0) + 1
-for cat, count in sorted(chunk_by_cat.items(), key=lambda x: -x[1]):
-    print(f"    {cat:<14} {count:>7,}")
+for cat, cnt in sorted(chunk_by_cat.items(), key=lambda x: -x[1]):
+    print(f"    {cat:<14} {cnt:>8,}")
+
 print("=" * 60)
