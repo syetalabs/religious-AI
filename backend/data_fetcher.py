@@ -24,8 +24,8 @@ _FILES = {
         ("hinduism/chunks.db",       "chunks.db",       False),
     ],
     "islam": [
-        ("islam/faiss_index.bin", "faiss_index.bin", False),
-        ("islam/chunks.db",       "chunks.db",       False),
+        ("islam/faiss_index-en-si-ta.bin", "faiss_index-en-si-ta.bin", False),
+        ("islam/chunks-en-si-ta.db",       "chunks-en-si-ta.db",       False),
     ],
 }
 
@@ -34,7 +34,7 @@ _STALE_FILES = {
     "buddhism":     ["faiss_index.bin", "chunks.db"],
     "christianity": ["faiss_index.bin", "chunks.db"],   # replaced by en-si-ta files
     "hinduism":     [],
-    "islam":        [],
+    "islam":        ["faiss_index.bin", "chunks.db"],
 }
 
 

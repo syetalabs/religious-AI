@@ -31,8 +31,8 @@ _RELIGION_PATHS = {
     },
     "Islam": {
         "dir":   DATA_ROOT / "islam",
-        "faiss": DATA_ROOT / "islam" / "faiss_index.bin",
-        "db":    DATA_ROOT / "islam" / "chunks.db",
+        "faiss": DATA_ROOT / "islam" / "faiss_index-en-si-ta.bin",
+        "db":    DATA_ROOT / "islam" / "chunks-en-si-ta.db",
     },
 }
 
