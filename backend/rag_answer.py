@@ -211,7 +211,46 @@ _PERSONAS_SI = {
 - ඉහත [Source: ...] ටැග් වල දිස් නොවන කිසිදු ග්‍රන්ථ නාමයක් (1 කොරින්ති, හිතෝපදේශ, 1 යොහන් ආදී) සඳහන් නොකරන්න.
 - ලබා දී ඇති සන්දර්භයේ නැති පාඨ නැවත නිෂ්පාදනය නොකරන්න හෝ ප්‍රතිනිර්මාණය නොකරන්න.
 - කිසිදා මතකයෙන් උද්ධෘත හෝ ග්‍රන්ථ නාම නිර්මාණය නොකරන්න — සන්දර්භයේ ඇති දෙය පමණක් භාවිත කරන්න.""",
+
+    "Islam": """ඔබ ඉස්ලාම් ධර්මය හා එහි ශාස්ත්‍රීය ග්‍රන්ථ ගැන දැනුවත්, කරුණාවන්ත මාර්ගෝපදේශකයෙකි.
+
+ඔබ අනිවාර්යෙන් අනුගමනය කළ යුතු නීති:
+- [Source: ...] ටැග් අතර ඇති ශාස්ත්‍රීය සන්දර්භය පමණක් භාවිත කර පිළිතුරු දෙන්න. ඔබේ ස්වකීය දැනුම කිසිසේත් භාවිත නොකරන්න.
+- සන්දර්භය ප්‍රමාණවත් නොවේ නම්, හරියටම මෙසේ කියන්න:
+  "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ."
+- සරල, පැහැදිලි, දෛනික භාෂාව භාවිත කරන්න.
+- පෞද්ගලික මත හෝ සදාචාරාත්මක විනිශ්චය ඉදිරිපත් නොකරන්න.
+- ඉස්ලාම් ධර්මය වෙනත් ආගම් සමඟ සසඳන්න එපා.
+- සෑම විටෙකම උණුසුම්, ගෞරවනීය හා සාදරයෙන් පිළිගන්නා ස්වරයක් පවත්වා ගන්න.
+
+තීරණාත්මක — උද්ධෘත නීති:
+- ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම්, නිශ්චිත වාක්‍ය හෝ හදීස් අංක (Quran 2:255, Bukhari 1 වැනි) උද්ධෘත නොකරන්න.
+- ලබා දී ඇති සන්දර්භයේ නැති පාඨ නැවත නිෂ්පාදනය නොකරන්න.
+- කිසිදා මතකයෙන් උද්ධෘත නිර්මාණය නොකරන්න — සන්දර්භයේ ඇති දෙය පමණක් භාවිත කරන්න.""",
 }
+
+# ════════════════════════════════════════════════════════════════
+# Per-religion persona prompts  (Tamil)
+# ════════════════════════════════════════════════════════════════
+
+_PERSONAS_TA = {
+    "Islam": """நீங்கள் இஸ்லாம் மதம் மற்றும் அதன் புனித நூல்கள் பற்றி அறிந்த, இரக்கமுள்ள வழிகாட்டி.
+
+நீங்கள் கட்டாயமாக பின்பற்ற வேண்டிய விதிகள்:
+- [Source: ...] குறிச்சொற்களுக்கு இடையே உள்ள மறைநூல் சூழலை மட்டுமே பயன்படுத்தி பதிலளிக்கவும். உங்கள் சொந்த அறிவை எக்காரணத்திற்காகவும் பயன்படுத்தாதீர்கள்.
+- சூழல் போதுமானதாக இல்லாவிட்டால், சரியாக இவ்வாறு கூறுங்கள்:
+  "இதை சரியாக பதிலளிக்க போதுமான நம்பகமான மறைநூல் சூழல் என்னிடம் இல்லை."
+- எளிய, தெளிவான, அன்றாட மொழியைப் பயன்படுத்துங்கள்.
+- தனிப்பட்ட கருத்துக்கள் அல்லது தார்மீக தீர்ப்புகளை தெரிவிக்காதீர்கள்.
+- இஸ்லாமை மற்ற மதங்களுடன் ஒப்பிடாதீர்கள்.
+- எல்லா நேரங்களிலும் அன்பான, மரியாதையான மற்றும் வரவேற்கும் தொனியை பராமரிக்கவும்.
+
+முக்கியமான — மேற்கோள் விதிகள்:
+- வழங்கப்பட்ட சூழலில் சரியாக அந்த குறிப்புகள் தோன்றாவிட்டால், குறிப்பிட்ட வசன அல்லது ஹதீஸ் எண்களை (Quran 2:255, Bukhari 1 போன்றவை) மேற்கோள் காட்டாதீர்கள்.
+- வழங்கப்பட்ட சூழலில் இல்லாத உரையை மீண்டும் உருவாக்காதீர்கள்.
+- நினைவிலிருந்து மேற்கோள்களை உருவாக்காதீர்கள் — சூழலில் உள்ளதை மட்டுமே பயன்படுத்துங்கள்.""",
+}
+
 
 # ════════════════════════════════════════════════════════════════
 # Moderation config
@@ -2540,6 +2579,83 @@ def _answer_with_native_christianity_chunks(
 # Core answer function
 # ════════════════════════════════════════════════════════════════
 
+def _answer_with_native_islam_chunks(
+    question:   str,
+    en_query:   str,
+    native_res: list,
+    target_lang: str,   # "si" or "ta"
+) -> dict:
+    """
+    Answer an Islam question using native-language (Sinhala or Tamil) chunks
+    retrieved from the DB. Falls back to translator if native chunks are
+    available but the LLM produces a weak/empty answer.
+    """
+    from translator import translate_from_english
+
+    context = "\n\n---\n\n".join(
+        f"[Source: {r['book']} | {r.get('section', r.get('source', ''))}]\n{r['text']}"
+        for r in native_res
+    )
+
+    persona      = _PERSONAS_SI.get("Islam", _PERSONAS_EN["Islam"]) if target_lang == "si"                    else _PERSONAS_TA.get("Islam", _PERSONAS_EN["Islam"])
+    format_instr = _format_instructions("Islam", _is_list_request(question), target_lang)
+
+    if target_lang == "si":
+        ref_note     = "Quran 2:255, Bukhari 1 වැනි නිශ්චිත වාක්‍ය අංක උද්ධෘත නොකරන්න"
+        user_message = (
+            f"ශාස්ත්‍රීය සන්දර්භය:\n{context}\n\n"
+            f"ප්‍රශ්නය: {question}\n\n"
+            f"උපදෙස්:\n{format_instr}\n"
+            f"- ලබා දී ඇති සන්දර්භයේ හරියටම ඒ යොමු දිස් නොවේ නම් {ref_note}.\n\n"
+            f"පිළිතුර:"
+        )
+    else:
+        ref_note     = "Quran 2:255, Bukhari 1 போன்ற குறிப்பிட்ட வசன எண்களை மேற்கோள் காட்டாதீர்கள்"
+        user_message = (
+            f"மறைநூல் சூழல்:\n{context}\n\n"
+            f"கேள்வி: {question}\n\n"
+            f"வழிமுறைகள்:\n{format_instr}\n"
+            f"- வழங்கப்பட்ட சூழலில் சரியாக தோன்றாவிட்டால் {ref_note}.\n\n"
+            f"பதில்:"
+        )
+
+    raw = _call_groq(persona, user_message, MODEL_SINHALA)
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
+    raw = _trim_incomplete_sentence(raw)
+    raw = _scrub_no_context_sentence(raw)
+
+    if not raw or _answer_is_no_context(raw) or _answer_is_weak(raw):
+        return {}
+
+    # Translate the English LLM answer into the target language
+    translated = translate_from_english(raw, target_lang)
+    translated = _trim_incomplete_sentence(translated)
+    translated = _review_translation(raw, translated, "Islam", target_lang)
+    translated = _trim_incomplete_sentence(translated)
+    translated = _scrub_question_echo(translated)
+
+    final_answer, warnings = moderate_output(translated, context, "Islam", target_lang)
+    final_answer = _scrub_question_echo(final_answer)
+
+    for r in native_res:
+        if not r.get("book"):
+            r["book"] = (r.get("section") or r.get("source") or "").strip()
+    answer_lower    = final_answer.lower()
+    matched         = [r for r in native_res if r.get("book", "").lower() in answer_lower]
+    display_results = matched if matched else native_res
+    src_list, scores_out = _unique_sources(display_results)
+
+    return {
+        "answer":         final_answer,
+        "sources":        src_list,
+        "scores":         scores_out,
+        "flagged":        False,
+        "low_confidence": False,
+        "warnings":       warnings,
+    }
+
+
 def answer_question(
     question: str,
     religion: str = "Buddhism",
@@ -2628,31 +2744,34 @@ def answer_question(
             return _english_context_then_translate(question, en_query, religion, target_lang="ta")
 
         if religion == "Islam":
-            print("  [ta] Islam — English only, returning English answer for Tamil query")
-            results = search(en_query, religion="Islam", language="en")
-            if not results:
-                return {
-                    "answer":         _FALLBACK_MESSAGES["en"]["no_context"],
-                    "sources":        [], "scores":  [],
-                    "flagged":        False, "low_confidence": True, "warnings": [],
-                }
-            results = _refine_results(results, "Islam")
-            raw = _build_english_answer(en_query, results, "Islam")
-            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
-            raw = _trim_incomplete_sentence(raw)
-            raw = _scrub_question_echo(raw)
-            final_answer, warnings = moderate_output(raw, "", "Islam", "en")
-            final_answer = _scrub_question_echo(final_answer)
-            for r in results:
-                if not r.get("book"):
-                    r["book"] = (r.get("pitaka") or r.get("source") or "").strip()
-            disp = [r for r in results if r.get("book")] or results
-            src, scores_out = _unique_sources(disp)
-            return {
-                "answer": final_answer, "sources": src, "scores": scores_out,
-                "flagged": False, "low_confidence": False, "warnings": warnings,
-            }
+            from retrieve import search_christianity_native_lang
+            print("  [ta] Islam — checking chunks-en-si-ta.db for Tamil chunks")
+            try:
+                native_res = search_christianity_native_lang(en_query, language="ta")
+            except Exception as exc:
+                print(f"  [ta] Islam native search error: {exc} — falling back to translate path")
+                native_res = []
+
+            if len(native_res) >= MIN_CHUNKS_FOR_NATIVE:
+                print(f"  [ta] Islam: {len(native_res)} Tamil chunks found — answering with native context")
+                try:
+                    result = _answer_with_native_islam_chunks(
+                        question, en_query, native_res, target_lang="ta"
+                    )
+                except Exception as exc:
+                    print(f"  [ta] Islam native path error: {exc} — falling back to translate path")
+                    result = {}
+                if result:
+                    return result
+                print("  [ta] Islam native answer weak — falling back to translate path")
+            else:
+                print(
+                    f"  [ta] Islam: only {len(native_res)} Tamil chunk(s) found "
+                    f"(need {MIN_CHUNKS_FOR_NATIVE}) — using English context + translation"
+                )
+
+            print("  [ta] Islam — using English context + translation fallback")
+            return _english_context_then_translate(question, en_query, "Islam", target_lang="ta")
 
         # For Christianity: first try native Tamil chunks from chunks-en-si-ta.db
         if religion == "Christianity":
@@ -2720,31 +2839,34 @@ def answer_question(
             return _english_context_then_translate(question, en_query, religion, target_lang="si")
 
         if religion == "Islam":
-            print("  [si] Islam — English only, returning English answer for Sinhala query")
-            results = search(en_query, religion="Islam", language="en")
-            if not results:
-                return {
-                    "answer":         _FALLBACK_MESSAGES["en"]["no_context"],
-                    "sources":        [], "scores":  [],
-                    "flagged":        False, "low_confidence": True, "warnings": [],
-                }
-            results = _refine_results(results, "Islam")
-            raw = _build_english_answer(en_query, results, "Islam")
-            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-            raw = re.sub(r"<think>.*$",         "", raw, flags=re.DOTALL).strip()
-            raw = _trim_incomplete_sentence(raw)
-            raw = _scrub_question_echo(raw)
-            final_answer, warnings = moderate_output(raw, "", "Islam", "en")
-            final_answer = _scrub_question_echo(final_answer)
-            for r in results:
-                if not r.get("book"):
-                    r["book"] = (r.get("pitaka") or r.get("source") or "").strip()
-            disp = [r for r in results if r.get("book")] or results
-            src, scores_out = _unique_sources(disp)
-            return {
-                "answer": final_answer, "sources": src, "scores": scores_out,
-                "flagged": False, "low_confidence": False, "warnings": warnings,
-            }
+            from retrieve import search_christianity_native_lang
+            print("  [si] Islam — checking chunks-en-si-ta.db for Sinhala chunks")
+            try:
+                native_res = search_christianity_native_lang(en_query, language="si")
+            except Exception as exc:
+                print(f"  [si] Islam native search error: {exc} — falling back to translate path")
+                native_res = []
+
+            if len(native_res) >= MIN_CHUNKS_FOR_NATIVE:
+                print(f"  [si] Islam: {len(native_res)} Sinhala chunks found — answering with native context")
+                try:
+                    result = _answer_with_native_islam_chunks(
+                        question, en_query, native_res, target_lang="si"
+                    )
+                except Exception as exc:
+                    print(f"  [si] Islam native path error: {exc} — falling back to translate path")
+                    result = {}
+                if result:
+                    return result
+                print("  [si] Islam native answer weak — falling back to translate path")
+            else:
+                print(
+                    f"  [si] Islam: only {len(native_res)} Sinhala chunk(s) found "
+                    f"(need {MIN_CHUNKS_FOR_NATIVE}) — using English context + translation"
+                )
+
+            print("  [si] Islam — using English context + translation fallback")
+            return _english_context_then_translate(question, en_query, "Islam", target_lang="si")
 
         # Christianity: first try native Sinhala chunks from chunks-en-si-ta.db,
         # then fall back to the English-context + translate path.

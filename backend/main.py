@@ -117,8 +117,8 @@ def health():
             "db":    Path("/tmp/religious-ai-data/hinduism/chunks.db"),
         },
         "islam": {
-            "faiss": Path("/tmp/religious-ai-data/islam/faiss_index.bin"),
-            "db":    Path("/tmp/religious-ai-data/islam/chunks.db"),
+            "faiss": Path("/tmp/religious-ai-data/islam/faiss_index-en-si-ta.bin"),
+            "db":    Path("/tmp/religious-ai-data/islam/chunks-en-si-ta.db"),
         },
     }.items():
         files_info[religion] = {
