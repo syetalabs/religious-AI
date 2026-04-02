@@ -467,19 +467,21 @@ MIN_CHUNKS_FOR_NATIVE = 2
 
 def search_christianity_native_lang(
     en_query:  str,
-    language:  str,          # "si" or "ta"
+    language:  str,                  # "si" or "ta"
+    religion:  str   = "Christianity",
     top_k:     int   = TOP_K,
     threshold: float = 0.20,
 ) -> list[dict]:
     """
-    Search chunks-en-si-ta.db for Sinhala or Tamil Christianity chunks.
-    Uses the unified Christianity FAISS index with an English query,
+    Search chunks-en-si-ta.db for Sinhala or Tamil chunks for any religion.
+    Uses the religion's already-loaded FAISS index with an English query,
     then filters by language in the DB.
+    The `religion` parameter defaults to "Christianity" for backwards compatibility.
     """
-    _lazy_load("Christianity")
+    _lazy_load(religion)
 
-    idx = _indexes.get("Christianity")
-    con = _cons.get("Christianity")
+    idx = _indexes.get(religion)
+    con = _cons.get(religion)
     if idx is None or con is None:
         return []
 
@@ -491,7 +493,7 @@ def search_christianity_native_lang(
     scores  = scores[0]
     indices = indices[0]
 
-    allowed_ids = set(_religion_ids["Christianity"].get("Christianity", []))
+    allowed_ids = set(_religion_ids[religion].get(religion, []))
 
     candidate_ids = [
         int(ix) for score, ix in zip(scores, indices)
@@ -507,10 +509,18 @@ def search_christianity_native_lang(
     score_map     = {int(ix): float(s) for s, ix in zip(scores, indices) if ix != -1}
 
     try:
+        # Use COALESCE across both column names:
+        # Christianity DB has 'testament', Islam DB has 'section' / 'category'
+        col_names = {row[1] for row in con.execute("PRAGMA table_info(chunks)").fetchall()}
+        pitaka_col = (
+            "testament" if "testament" in col_names else
+            "category"  if "category"  in col_names else
+            "source"
+        )
         rows = con.execute(
             f"""
             SELECT id, text, book, source,
-                   COALESCE(testament, '') AS pitaka,
+                   COALESCE({pitaka_col}, '') AS pitaka,
                    religion, language
             FROM   chunks
             WHERE  id IN ({placeholders})
@@ -543,7 +553,8 @@ def search_christianity_native_lang(
 
     results.sort(key=lambda r: -r["score"])
     print(
-        f"  [native-search] language={language!r} chunks returned: {len(results)} "
+        f"  [native-search] religion={religion!r} language={language!r} "
+        f"chunks returned: {len(results)} "
         f"(candidates scanned: {len(candidate_ids)}, fetch_k={fetch_k})"
     )
     return results

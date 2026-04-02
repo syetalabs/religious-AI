@@ -2747,7 +2747,7 @@ def answer_question(
             from retrieve import search_christianity_native_lang
             print("  [ta] Islam — checking chunks-en-si-ta.db for Tamil chunks")
             try:
-                native_res = search_christianity_native_lang(en_query, language="ta")
+                native_res = search_christianity_native_lang(en_query, language="ta", religion="Islam")
             except Exception as exc:
                 print(f"  [ta] Islam native search error: {exc} — falling back to translate path")
                 native_res = []
@@ -2842,7 +2842,7 @@ def answer_question(
             from retrieve import search_christianity_native_lang
             print("  [si] Islam — checking chunks-en-si-ta.db for Sinhala chunks")
             try:
-                native_res = search_christianity_native_lang(en_query, language="si")
+                native_res = search_christianity_native_lang(en_query, language="si", religion="Islam")
             except Exception as exc:
                 print(f"  [si] Islam native search error: {exc} — falling back to translate path")
                 native_res = []
