@@ -1,12 +1,22 @@
 """
 chunk_and_embed.py  —  Islam  (English + Sinhala + Tamil)
 
+Follows the same chunking strategy as Christianity:
+  - Word-based chunking (CHUNK_SIZE / CHUNK_OVERLAP) for all languages
+  - Single model: all-MiniLM-L6-v2 for all languages → single FAISS index
+  - English  : Surah preamble + synonym expansion injected into embed_text
+  - Sinhala / Tamil: plain "Surah + Category" header + raw chunk only
+                     (no English preambles — keeps native script chunks clean)
+  - Hadith   : source header + raw text (+ synonym expansion for English)
+
+Single model ensures query vectors and index vectors are always comparable.
+
 Reads:  data/quran_raw.json
 Writes:
-  data/chunks-en-si-ta.json        (backup — all chunk metadata without embed_text)
-  data/chunks-en-si-ta.db          (SQLite — runtime retrieval store, all languages)
-  data/embeddings-en-si-ta.npy     (numpy backup)
-  data/faiss_index-en-si-ta.bin    (FAISS index — runtime similarity search)
+  data/chunks-en-si-ta.json    (backup — all chunk metadata without embed_text)
+  data/chunks-en-si-ta.db      (SQLite — runtime retrieval store, all languages)
+  data/embeddings-en-si-ta.npy (numpy backup)
+  data/faiss_index-en-si-ta.bin (FAISS index — all languages, single index)
 
 quran_raw.json entry schema:
   {
@@ -19,24 +29,12 @@ quran_raw.json entry schema:
     "language": "en" | "sin" | "tam",
     "source":   "quran" | "bukhari" | "muslim" | ...
   }
-
-Embedding strategy per language:
-  English  — full preamble + context window + synonym expansion
-  Sinhala  — structural header + verse text only
-             (no English preamble; the native script carries its own semantics)
-  Tamil    — structural header + verse text only (same rationale)
-  Hadith   — structural header + hadith text + synonym expansion (all languages)
-
-The model (paraphrase-multilingual-MiniLM-L12-v2) is multilingual:
-it maps Sinhala, Tamil, and English into the same vector space, so
-cross-language semantic search works out of the box.
 """
 
 import json
 import sqlite3
 import numpy as np
 import faiss
-from collections import defaultdict
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
@@ -55,24 +53,21 @@ EMBEDDINGS_PATH = DATA_DIR / "embeddings-en-si-ta.npy"
 FAISS_PATH      = DATA_DIR / "faiss_index-en-si-ta.bin"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Settings
+# Settings  — mirrors Christianity exactly
 # ─────────────────────────────────────────────────────────────────────────────
 
-CONTEXT_WINDOW = 2   # neighbouring verses injected into embed_text (±2)
+CHUNK_SIZE    = 400    # words per chunk  (Christianity uses 400)
+CHUNK_OVERLAP = 80     # word overlap     (Christianity uses 80)
 
-# Multilingual model — maps EN, SIN, TAM into the same 384-dim vector space.
-# Swap to "paraphrase-multilingual-mpnet-base-v2" for higher quality (slower).
-MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-
-# Languages present in quran_raw.json
-ALL_LANGS = {"en", "sin", "tam"}
+# Single model for all languages — same model used at query time in retrieve.py
+# This ensures query vectors and index vectors are always from the same space.
+MODEL_NAME = "all-MiniLM-L6-v2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TOPIC PREAMBLE MAP  (English only — injected for EN entries)
 # ─────────────────────────────────────────────────────────────────────────────
 
 TOPIC_PREAMBLES: list[tuple[str, str]] = [
-
     ("Al-Fatihah", (
         "Al-Fatihah. Opening chapter. Bismillah. In the name of Allah. "
         "Praise to Allah Lord of the worlds. Most Gracious Most Merciful. "
@@ -80,264 +75,166 @@ TOPIC_PREAMBLES: list[tuple[str, str]] = [
         "Guide us to the straight path. Surah Fatiha. Daily prayer. Salah. "
         "Opening of the Quran. First surah."
     )),
-
     ("Al-Baqarah", (
         "Al-Baqarah. Longest surah. Quran guidance for believers. "
         "Taqwa. Fear of Allah. Five pillars. Prayer salah. Fasting sawm. "
         "Zakat. Hajj. Belief in Allah angels books prophets hereafter. "
         "Ayatul Kursi. Throne verse. Allah living sustaining. "
         "No compulsion in religion. 2:256. "
-        "Riba interest prohibited. Usury forbidden. "
-        "Marriage divorce. Inheritance. Qibla direction of prayer. "
-        "Children of Israel. Moses Pharaoh. Story of Adam. Iblis Satan. "
-        "Abraham builds Kaaba. Hypocrites. Believers disbelievers. "
-        "Fasting Ramadan. Laylatul Qadr. Night of Power. "
-        "Last two verses. Amana rasool."
+        "Riba interest prohibited. Marriage divorce. Inheritance. Qibla. "
+        "Children of Israel. Moses Pharaoh. Story of Adam. "
+        "Abraham builds Kaaba. Fasting Ramadan. Laylatul Qadr."
     )),
-
     ("Ali 'Imran", (
         "Ali Imran. Family of Imran. Jesus birth of Jesus. Mary Maryam. "
         "Isa prophet. Trinity refuted. Allah one God. "
         "Battle of Uhud. Unity of believers. Obedience to Allah. "
-        "Hold fast to the rope of Allah. 3:103. Do not divide. "
-        "Best nation ummah. Commanding good forbidding evil. 3:110. "
-        "Steadfastness in hardship. Patience sabr."
+        "Hold fast to the rope of Allah. Best nation ummah. "
+        "Commanding good forbidding evil. Patience sabr."
     )),
-
     ("An-Nisa", (
         "An-Nisa. Women. Rights of women in Islam. Marriage. "
         "Inheritance law. Orphans protection. Justice. "
-        "Obedience to Allah and messenger. "
         "Prohibition of usury riba. Guardianship. Divorce. "
         "Hypocrites. Jihad. Prayer shortened in travel."
     )),
-
     ("Al-Ma'idah", (
         "Al-Maidah. Table spread. Halal food permitted. Forbidden foods. "
-        "Pork blood prohibited. Fulfil contracts covenants. "
-        "Wudu ablution. Tayammum dry ablution. "
-        "Jesus disciples Hawariyyun. Last supper miracle. "
-        "Punishment for theft hudud. Qisas retaliation. "
-        "Jews Christians People of the Book. Friendship with disbelievers. "
-        "Allah forgives all sins except shirk."
+        "Pork blood prohibited. Wudu ablution. "
+        "Jesus disciples. Punishment for theft hudud. "
+        "Jews Christians People of the Book."
     )),
-
     ("Al-An'am", (
         "Al-Anam. Cattle. Tawhid oneness of Allah. Polytheism refuted. "
         "Abraham argues against idol worship. Signs of Allah in creation. "
-        "Day of Judgment. Accountability. Straight path sirat. "
-        "Prohibition of shirk. Associating partners with Allah."
+        "Day of Judgment. Accountability. Prohibition of shirk."
     )),
-
     ("Al-A'raf", (
         "Al-Araf. Heights. Story of Adam and Iblis. Fall of man. "
         "Stories of prophets Hud Salih Shuayb Lot Moses. "
-        "People of the heights. Hell heaven described. "
-        "Arrogance of Satan. Obedience to Allah."
+        "Hell heaven described. Arrogance of Satan."
     )),
-
     ("At-Tawbah", (
-        "At-Tawbah. Repentance. Bara'ah. Only surah without Bismillah. "
-        "Hypocrites exposed. Jihad. Jizya tax non-Muslims. "
-        "Repentance accepted by Allah. Tawbah. Allah turns to those who repent. "
-        "Masjid Dirar. Cave of Hira. Cave of Thawr."
+        "At-Tawbah. Repentance. Only surah without Bismillah. "
+        "Hypocrites exposed. Jihad. "
+        "Repentance accepted by Allah. Allah turns to those who repent."
     )),
-
     ("Yunus", (
         "Yunus. Jonah. Story of Prophet Yunus Jonah whale. "
-        "Patience of Yunus. Tasbih dhikr in darkness. "
-        "Signs of Allah. Day of Judgment. "
-        "Intercession on Day of Judgment. Faith of people of Nineveh."
+        "Patience of Yunus. Signs of Allah. Day of Judgment."
     )),
-
     ("Yusuf", (
-        "Yusuf. Joseph. Story of Prophet Yusuf Joseph. "
-        "Best of stories ahsan al-qasas. Brothers of Yusuf. "
+        "Yusuf. Joseph. Best of stories ahsan al-qasas. Brothers of Yusuf. "
         "Egypt. Zulaikha temptation. Prison. Dream interpretation. "
-        "Reunion with father Yaqub Jacob. Patience and trust in Allah. "
-        "Jealousy. Forgiveness. Allah's plan."
+        "Patience and trust in Allah. Forgiveness."
     )),
-
     ("Ibrahim", (
         "Ibrahim. Abraham. Prayer of Ibrahim for Mecca. "
-        "Gratitude shukr. Ingratitude kufr. "
-        "Parable of good word tree. Parable of evil word. "
-        "Day of Judgment. Intercession. Hellfire."
+        "Gratitude shukr. Parable of good word tree. Day of Judgment."
     )),
-
     ("Al-Kahf", (
-        "Al-Kahf. Cave. Companions of the cave Ashaab al-Kahf. "
-        "Story of Khidr and Moses. Story of Dhul-Qarnayn. Gog Magog Yajuj Majuj. "
-        "Parable of rich man and poor man. Garden parable. "
-        "Dajjal protection. Read Al-Kahf on Friday. "
-        "Wealth and children are trial. Say InshAllah."
+        "Al-Kahf. Cave. Companions of the cave. "
+        "Story of Khidr and Moses. Story of Dhul-Qarnayn. Gog Magog. "
+        "Dajjal protection. Read Al-Kahf on Friday."
     )),
-
     ("Maryam", (
         "Maryam. Mary. Birth of Jesus Isa. Virgin birth. "
         "Zakariyya prayer for son. Birth of Yahya John the Baptist. "
-        "Jesus speaks from cradle. Jesus prophet of Allah. "
-        "Ibrahim father rejects idols. Ismail Idris prophets."
+        "Jesus speaks from cradle. Jesus prophet of Allah."
     )),
-
     ("Ta-Ha", (
         "Ta-Ha. Moses Musa and Pharaoh Firaun. Burning bush. "
-        "Staff of Moses. Parting of sea. Samiri golden calf. "
-        "Adam and Eve in paradise. Iblis. "
-        "Expanded chest for messenger. Ease after hardship."
+        "Staff of Moses. Parting of sea. Ease after hardship."
     )),
-
     ("Al-Anbiya", (
         "Al-Anbiya. Prophets. Stories of many prophets. "
         "Ibrahim Lut Nuh Dawud Sulayman Ayyub Yunus Zakariyya Maryam Isa. "
-        "Tawhid message of all prophets. Day of Judgment. "
-        "We created you in pairs. Mercy to the worlds rahmatan lil alameen."
+        "Tawhid message of all prophets. Mercy to the worlds."
     )),
-
     ("Al-Mu'minun", (
         "Al-Muminun. Believers. Qualities of true believers. "
-        "Humble in prayer. Avoiding vain talk. Paying zakat. "
-        "Guarding private parts. Fulfilling trusts and covenants. "
-        "Creation of man from clay then sperm nutfah. Stages of human development."
+        "Humble in prayer. Paying zakat. Fulfilling trusts. "
+        "Creation of man. Stages of human development."
     )),
-
     ("An-Nur", (
-        "An-Nur. Light. Verse of Light ayat un-nur. Allah is light of heavens and earth. "
+        "An-Nur. Light. Verse of Light. Allah is light of heavens and earth. "
         "Prohibition of zina fornication. Punishment for adultery. "
-        "Hijab modesty for men and women. Lower your gaze. "
-        "False accusation qazf. Story of Aisha. "
-        "Permission to enter homes. Privacy."
+        "Hijab modesty for men and women. Lower your gaze. Privacy."
     )),
-
     ("Al-Furqan", (
-        "Al-Furqan. Criterion. Quran as criterion distinguishing truth from falsehood. "
-        "Attributes of servants of the Most Merciful Ibad ur-Rahman. "
-        "Those who walk humbly. Say Salam to ignorant. "
-        "Night prayer tahajjud. Balance between extravagance and miserliness."
+        "Al-Furqan. Criterion. Quran as criterion truth from falsehood. "
+        "Attributes of servants of the Most Merciful. Night prayer tahajjud."
     )),
-
     ("Ya-Sin", (
         "Ya-Sin. Heart of the Quran. Resurrection. Day of Judgment. "
-        "Signs of Allah in creation. Dead earth revived by rain. "
-        "Story of three messengers to a city. "
-        "Read Yasin for the dying. Importance of surah Yasin."
+        "Signs of Allah in creation. Read Yasin for the dying."
     )),
-
     ("Az-Zumar", (
         "Az-Zumar. Groups. Sincere devotion to Allah. "
-        "Worship Allah alone. Do not despair of Allah's mercy. 39:53. "
-        "Allah forgives all sins. Tawbah repentance. "
-        "Groups on Day of Judgment to hell and paradise."
+        "Do not despair of Allah's mercy. Allah forgives all sins. Tawbah repentance."
     )),
-
     ("Ghafir", (
-        "Ghafir. Forgiver. Believer of Pharaoh's household. "
-        "Secret believer defends Musa. Call upon Allah He answers. 40:60. "
-        "Dua supplication. Allah responds to dua. Ask Allah for your needs."
+        "Ghafir. Forgiver. Call upon Allah He answers. Dua supplication."
     )),
-
     ("Fussilat", (
         "Fussilat. Explained in detail. Quran guidance and healing. "
-        "For believers guidance and healing. For disbelievers deafness. "
-        "We will show them Our signs in horizons and themselves. 41:53. "
-        "Limbs will testify on Day of Judgment."
+        "We will show them Our signs. Limbs will testify on Day of Judgment."
     )),
-
     ("Muhammad", (
-        "Muhammad. Surah Muhammad. Jihad fighting in way of Allah. "
-        "Believers forgiven sins. Paradise rivers of water milk honey wine. "
-        "Obey Allah and messenger. Do not nullify deeds. "
-        "Be not faint-hearted call for peace."
+        "Muhammad. Surah Muhammad. Jihad. "
+        "Paradise rivers of water milk honey wine. Obey Allah and messenger."
     )),
-
     ("Al-Hujurat", (
         "Al-Hujurat. Chambers. Islamic etiquette adab. "
-        "Do not raise voices above Prophet. Verify news tabayyun. "
-        "Do not mock others. Avoid suspicion. Do not spy. "
-        "Backbiting gheebah like eating dead brother's flesh. "
-        "All mankind created from Adam and Eve. Most noble is most pious. "
-        "Believers are brothers. Make peace between brothers."
+        "Verify news. Do not mock others. Avoid suspicion. Do not spy. "
+        "Backbiting gheebah. All mankind from Adam and Eve. "
+        "Most noble is most pious. Believers are brothers."
     )),
-
     ("Ar-Rahman", (
         "Ar-Rahman. Most Merciful. Which favours of your Lord will you deny. "
-        "Fa bi ayyi ala i rabbikuma tukadhdhibaan. "
-        "Blessings of Allah. Creation of man from clay. "
-        "Two paradises jannah described. Rivers springs fruits. "
-        "Balance mizan. Justice. Jinn and mankind."
+        "Blessings of Allah. Two paradises jannah. Balance mizan. Justice."
     )),
-
     ("Al-Waqi'ah", (
         "Al-Waqiah. Inevitable event. Day of Judgment. "
-        "Three groups: forerunners sabiqoon companions of right companions of left. "
-        "Paradise described. Hell described. "
-        "Read surah Waqiah for rizq provision wealth. "
-        "Creation of food water fire as blessings."
+        "Three groups forerunners companions of right companions of left. "
+        "Paradise described. Hell described. Read surah Waqiah for rizq."
     )),
-
     ("Al-Mulk", (
-        "Al-Mulk. Sovereignty. Dominion. Blessed is He in whose hand is dominion. "
-        "Created death and life to test which is best in deed. "
-        "Seven heavens layers of creation. "
-        "Allah knows what is concealed. Read Al-Mulk every night. "
-        "Intercedes for reciter in grave. Protection from punishment of grave."
+        "Al-Mulk. Sovereignty. Dominion. Created death and life to test. "
+        "Seven heavens. Read Al-Mulk every night. Protection from punishment of grave."
     )),
-
     ("Al-Insan", (
         "Al-Insan. Man. Creation of man tested. "
-        "Righteous drink from cup of kafoor and zanjabeel. "
-        "Reward of paradise for feeding poor orphan captive. "
-        "We fed you for sake of Allah we want no reward. "
-        "Patience patience of believers."
+        "Reward of paradise for feeding poor orphan captive."
     )),
-
     ("An-Naba", (
-        "An-Naba. Great news. Day of Judgment described. "
-        "Earth as cradle mountains as pegs. Sleep as rest. "
-        "Trumpet blown. Hell torment. Paradise reward. "
-        "Day of Sorting out yawm al-fasl."
+        "An-Naba. Great news. Day of Judgment. "
+        "Trumpet blown. Hell torment. Paradise reward."
     )),
-
     ("Al-Fajr", (
-        "Al-Fajr. Dawn. Oath by dawn. "
-        "Stories of Aad Thamud Pharaoh destroyed for corruption. "
-        "Man ungrateful in hardship. Regret on Day of Judgment. "
-        "Soul at rest nafs mutmainnah return to your Lord well-pleased."
+        "Al-Fajr. Dawn. Stories of Aad Thamud Pharaoh destroyed. "
+        "Soul at rest nafs mutmainnah return to your Lord."
     )),
-
     ("Al-Ikhlas", (
         "Al-Ikhlas. Sincerity. Say He is Allah One. Ahad. "
         "Allah the Eternal Absolute Samad. He begets not nor was begotten. "
-        "None equal to Him. Tawhid. Oneness of God. Pure monotheism. "
-        "Equal to one third of Quran. Most important surah for tawhid."
+        "Tawhid. Oneness of God. Pure monotheism. Equal to one third of Quran."
     )),
-
     ("Al-Falaq", (
         "Al-Falaq. Daybreak. Seek refuge in Lord of daybreak. "
-        "Evil of what He created. Evil of darkness. "
-        "Evil of those who blow on knots. Evil of envier. "
-        "Protection from black magic evil eye hasad. Ruqyah."
+        "Evil of what He created. Protection from black magic evil eye. Ruqyah."
     )),
-
     ("An-Nas", (
         "An-Nas. Mankind. Seek refuge in Lord of mankind. "
-        "King of mankind God of mankind. "
-        "Evil of whispering retreating Shaytan. "
-        "Who whispers in hearts of men. Jinn and men. Protection from Shaytan."
+        "Evil of whispering retreating Shaytan. Protection from Shaytan."
     )),
-
     ("Al-Qadr", (
         "Al-Qadr. Power decree. Night of Power Laylatul Qadr. "
-        "Better than thousand months. Angels and Spirit descend. "
-        "Peace until dawn. Last ten nights of Ramadan. Odd nights. "
-        "Seek Laylatul Qadr. Dua on night of power."
+        "Better than thousand months. Last ten nights of Ramadan. Odd nights."
     )),
-
     ("Al-'Asr", (
         "Al-Asr. Time. By time mankind is in loss. "
-        "Except those who believe do good deeds enjoin truth and patience. "
-        "Four qualities of successful person. Time is running out. "
-        "Importance of faith deeds truth patience."
+        "Except those who believe do good deeds enjoin truth and patience."
     )),
 ]
 
@@ -352,163 +249,90 @@ def _get_topic_preamble(section: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SYNONYM EXPANSION MAP  (English — injected for EN entries only)
+# SYNONYM EXPANSION MAP  (English only)
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYNONYM_EXPANSIONS: list[tuple[list[str], str]] = [
-
     (["allah", "god", "lord", "rabb", "ilah", "creator"],
      "Who is Allah. Nature of God in Islam. Tawhid oneness of Allah. "
-     "Allah's names and attributes. 99 names of Allah. Asmaul Husna. "
-     "Allah is one Ahad. Allah is eternal Samad. "
-     "Allah all-knowing all-seeing all-hearing. Omnipotent."),
-
+     "Allah's names and attributes. 99 names of Allah. Asmaul Husna. Omnipotent."),
     (["prayer", "salah", "salat", "pray", "worship", "prostrate",
       "ruku", "sujud", "wudu", "ablution", "qibla", "mosque", "masjid"],
      "Salah prayer in Islam. Five daily prayers. Fajr Dhuhr Asr Maghrib Isha. "
-     "How to perform salah. Importance of prayer. "
-     "Prayer pillar of Islam. Wudu before prayer. Direction of Mecca. "
-     "Friday prayer Jumuah. Night prayer tahajjud qiyam al-layl."),
-
+     "How to perform salah. How many times do Muslims pray per day. "
+     "Prayer pillar of Islam. Wudu before prayer. "
+     "Friday prayer Jumuah. Night prayer tahajjud."),
     (["fast", "fasting", "sawm", "ramadan", "iftar", "suhoor", "suhur"],
      "Fasting in Islam. Sawm Ramadan. Pillar of Islam. "
-     "Why Muslims fast. Benefits of fasting. Ramadan month of Quran. "
-     "Laylatul Qadr night of power. Eid ul-Fitr after Ramadan. "
-     "What breaks the fast. Intention for fasting."),
-
-    (["zakat", "charity", "sadaqah", "giving", "poor", "needy",
-      "orphan", "spending in the way of allah"],
+     "Why Muslims fast. Ramadan month of Quran. "
+     "Laylatul Qadr night of power. Eid ul-Fitr after Ramadan."),
+    (["zakat", "charity", "sadaqah", "giving", "poor", "needy", "orphan"],
      "Zakat in Islam. Obligatory charity. Pillar of Islam. "
-     "Sadaqah voluntary charity. Giving to poor needy orphans. "
-     "Spending in way of Allah. Wealth purification. "
-     "Who must pay zakat. Nisab threshold. Reward for charity."),
-
+     "Sadaqah voluntary charity. Giving to poor needy orphans."),
     (["hajj", "pilgrimage", "kaaba", "mecca", "ihram", "tawaf",
       "safa marwa", "arafat", "mina", "umrah"],
      "Hajj pilgrimage to Mecca. Fifth pillar of Islam. "
-     "Kaaba house of Allah. Circumambulation tawaf. "
-     "Stoning of devil Jamarat. Mount Arafat. "
-     "Umrah lesser pilgrimage. Ihram state of sanctity. "
-     "Eid ul-Adha sacrifice after Hajj."),
-
-    (["quran", "quran recitation", "scripture", "revelation", "kitab",
-      "book", "word of allah", "recite"],
+     "Kaaba house of Allah. Eid ul-Adha sacrifice after Hajj."),
+    (["quran", "scripture", "revelation", "kitab", "word of allah", "recite"],
      "Quran as word of Allah. Reading reciting the Quran. "
-     "Importance of Quran. Quran guidance for mankind. "
-     "Quran revealed in Ramadan. Quran preserved unchanged. "
-     "Learn Quran memorize Quran. Tajweed recitation rules."),
-
+     "Quran guidance for mankind. Quran revealed in Ramadan."),
     (["prophet", "muhammad", "messenger", "rasul", "nabi",
       "sunnah", "hadith", "pbuh", "peace be upon him"],
      "Prophet Muhammad peace be upon him. Last prophet. "
-     "Following the sunnah. Hadith teachings of prophet. "
-     "Love for the prophet. Obey Allah and His messenger. "
-     "Life of prophet Muhammad. Sirah. Character of prophet."),
-
+     "Following the sunnah. Hadith teachings of prophet."),
     (["paradise", "heaven", "jannah", "garden", "reward", "hereafter",
       "akhira", "eternal life", "bliss"],
      "Jannah paradise in Islam. Description of paradise. "
-     "Reward for believers. Gardens of paradise rivers of milk honey. "
-     "Seeing Allah in paradise. Highest level Firdaus. "
-     "How to enter paradise. Good deeds for jannah. Akhira hereafter."),
-
-    (["hell", "hellfire", "jahannam", "punishment", "torment", "fire",
-      "wrath", "azab"],
+     "Reward for believers. Gardens rivers of milk honey. "
+     "How to enter paradise. Akhira hereafter."),
+    (["hell", "hellfire", "jahannam", "punishment", "torment", "fire", "azab"],
      "Jahannam hellfire in Islam. Punishment of hellfire. "
-     "Torment of hell. Boiling water. Zaqqum tree of hell. "
-     "Who goes to hell. Sins leading to hellfire. "
-     "Punishment of grave. Fear of Allah's wrath."),
-
+     "Who goes to hell. Sins leading to hellfire."),
     (["day of judgment", "qiyamah", "resurrection", "reckoning",
-      "accountability", "scales mizan", "book of deeds", "sirat bridge"],
+      "accountability", "scales mizan", "book of deeds"],
      "Yawm al-Qiyamah Day of Judgment. Resurrection of the dead. "
-     "Accountability before Allah. Scales of deeds mizan. "
-     "Book of deeds. Bridge over hellfire sirat. "
-     "Intercession shafaah. What happens on Day of Judgment."),
-
+     "Accountability before Allah. Scales of deeds mizan."),
     (["sin", "repentance", "tawbah", "forgiveness", "istighfar",
-      "astaghfirullah", "mercy", "rahma"],
+      "mercy", "rahma"],
      "Tawbah repentance in Islam. Allah forgives all sins. "
-     "Seeking forgiveness istighfar. Allah's mercy rahma. "
-     "Conditions of repentance. Turn back to Allah. "
-     "Do not despair of Allah's mercy. 39:53."),
-
+     "Seeking forgiveness istighfar. Allah's mercy. "
+     "Do not despair of Allah's mercy."),
     (["shirk", "polytheism", "idol", "idol worship", "associating partners",
       "tawhid", "oneness"],
      "Shirk worst sin in Islam. Associating partners with Allah. "
-     "Tawhid monotheism. Idol worship forbidden. "
-     "Allah does not forgive shirk. Polytheism refuted in Quran. "
-     "Pure monotheism Islam."),
-
-    (["jesus", "isa", "messiah", "christ", "mary", "maryam",
-      "virgin birth", "crucifixion"],
+     "Tawhid monotheism. Idol worship forbidden. Pure monotheism Islam."),
+    (["jesus", "isa", "messiah", "christ", "mary", "maryam"],
      "Isa Jesus in Islam. Prophet Isa ibn Maryam. "
-     "Miraculous birth of Isa. Jesus is prophet not son of God. "
-     "Isa did not die on cross. Allah raised Isa. "
-     "Second coming of Isa. Maryam Mary honoured in Islam."),
-
-    (["moses", "musa", "pharaoh", "firaun", "exodus", "parting sea",
-      "torah", "tawrat"],
+     "Miraculous birth of Isa. Jesus is prophet not son of God."),
+    (["moses", "musa", "pharaoh", "firaun", "exodus"],
      "Musa Moses prophet in Islam. Moses and Pharaoh Firaun. "
-     "Exodus from Egypt. Miracles of Moses staff. Parting of Red Sea. "
-     "Tawrat Torah revealed to Moses. Ten Commandments. "
-     "Children of Israel Bani Israel."),
-
-    (["abraham", "ibrahim", "ismail", "ishmael", "kaaba", "sacrifice",
-      "monotheism", "hanif"],
+     "Exodus from Egypt. Children of Israel Bani Israel."),
+    (["abraham", "ibrahim", "ismail", "ishmael", "kaaba", "sacrifice"],
      "Ibrahim Abraham prophet in Islam. Father of prophets. "
-     "Building of Kaaba with Ismail. Sacrifice of Ismail. Eid ul-Adha. "
-     "Ibrahim breaks idols. Hanif pure monotheist. "
-     "Friend of Allah Khalilullah."),
-
+     "Building of Kaaba with Ismail. Ibrahim breaks idols."),
     (["patience", "sabr", "trial", "test", "hardship", "difficulty",
       "tribulation", "suffering"],
      "Sabr patience in Islam. Allah tests believers. "
-     "Indeed with hardship comes ease. 94:5-6. "
-     "Patience in hardship illness loss. Reward for patient. "
-     "Do not lose hope in Allah. Trust in Allah tawakkul."),
-
-    (["dua", "supplication", "ask allah", "pray to allah",
-      "call upon", "invocation"],
-     "Dua supplication in Islam. Call upon Allah He answers. 40:60. "
-     "How to make dua. Conditions for dua acceptance. "
-     "Times when dua is answered. Last third of night. "
-     "Dua is worship ibadah. Ask only from Allah."),
-
-    (["knowledge", "ilm", "learn", "education", "seek knowledge",
-      "wisdom", "intellect", "reason"],
-     "Seeking knowledge in Islam. Seek knowledge from cradle to grave. "
-     "Importance of learning in Islam. First revelation iqra read. "
-     "Scholars inherit prophets. Knowledge as obligation. "
-     "Pen qalam first creation of Allah."),
-
+     "Indeed with hardship comes ease. Trust in Allah tawakkul."),
+    (["dua", "supplication", "ask allah", "call upon", "invocation"],
+     "Dua supplication in Islam. Call upon Allah He answers. "
+     "How to make dua. Dua is worship ibadah."),
+    (["knowledge", "ilm", "learn", "education", "seek knowledge", "wisdom"],
+     "Seeking knowledge in Islam. First revelation iqra read. "
+     "Scholars inherit prophets. Knowledge as obligation."),
     (["marriage", "nikah", "husband", "wife", "family", "children",
       "divorce", "talaq", "spouse"],
-     "Marriage nikah in Islam. Importance of marriage. "
-     "Rights of husband and wife. Mahr dowry. Treating spouse well. "
-     "Children rights in Islam. Divorce talaq last resort. "
-     "Family as foundation of society."),
-
-    (["death", "dying", "soul", "ruh", "grave", "barzakh",
-      "angel of death", "malak ul maut"],
-     "Death in Islam. Soul ruh. Angel of death Malak ul-Maut. "
-     "What happens after death. Life in grave barzakh. "
-     "Every soul shall taste death. Preparation for death. "
-     "Good death husn ul-khatimah. Remembrance of death."),
-
-    (["jihad", "struggle", "strive", "way of allah", "fight",
-      "greater jihad", "lesser jihad"],
+     "Marriage nikah in Islam. Rights of husband and wife. "
+     "Divorce talaq last resort. Family as foundation of society."),
+    (["death", "dying", "soul", "ruh", "grave", "barzakh"],
+     "Death in Islam. Soul ruh. What happens after death. "
+     "Life in grave barzakh. Every soul shall taste death."),
+    (["jihad", "struggle", "strive", "way of allah", "fight"],
      "Jihad in Islam. Striving in way of Allah. "
-     "Greater jihad against one's own nafs soul. "
-     "Struggle against evil. Defending truth. "
-     "Justice fighting oppression. Islam religion of peace."),
-
-    (["halal", "haram", "forbidden", "permitted", "lawful", "unlawful",
-      "pork", "alcohol", "riba", "interest"],
-     "Halal and haram in Islam. Permitted and forbidden. "
-     "Pork forbidden. Alcohol forbidden. Riba interest forbidden. "
-     "Eat what is halal and good. Islamic law sharia. "
-     "Avoiding what Allah has prohibited."),
+     "Greater jihad against one's own nafs. Islam religion of peace."),
+    (["halal", "haram", "forbidden", "permitted", "pork", "alcohol", "riba"],
+     "Halal and haram in Islam. Pork forbidden. Alcohol forbidden. "
+     "Riba interest forbidden. Islamic law sharia."),
 ]
 
 
@@ -522,18 +346,34 @@ def _get_synonym_expansion(text: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Chunking helper  — mirrors Christianity exactly
+# ─────────────────────────────────────────────────────────────────────────────
+
+def chunk_text(text: str,
+               size: int = CHUNK_SIZE,
+               overlap: int = CHUNK_OVERLAP) -> list[str]:
+    words  = text.split()
+    chunks = []
+    for i in range(0, len(words), size - overlap):
+        chunk = " ".join(words[i : i + size])
+        if len(chunk.strip()) > 40:
+            chunks.append(chunk)
+    return chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Load corpus
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("=" * 60)
 print("  Islam Chunk & Embed — English + Sinhala + Tamil")
+print("  Strategy: word-based chunking (mirrors Christianity)")
 print("=" * 60)
 
 print(f"\nLoading corpus from {CORPUS_PATH.name} ...")
 corpus: list[dict] = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
 print(f"Loaded {len(corpus):,} passage entries")
 
-# Summary by language × source
 by_lang_src: dict[str, int] = {}
 for item in corpus:
     key = f"{item.get('language','?')}:{item.get('source','?')}"
@@ -543,28 +383,13 @@ for k, cnt in sorted(by_lang_src.items(), key=lambda x: -x[1]):
     print(f"    {k:<28} {cnt:>7,}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Group corpus by (language, surah) for context-window look-ups
-# ─────────────────────────────────────────────────────────────────────────────
-
-# surah_verses[(lang, surah_num)] = sorted list of verse entries
-surah_verses: dict[tuple[str, int], list[dict]] = defaultdict(list)
-for item in corpus:
-    lang  = item.get("language", "en")
-    surah = item.get("surah", 0)
-    if item.get("category") != "Hadith" and surah > 0:
-        surah_verses[(lang, surah)].append(item)
-
-for key in surah_verses:
-    surah_verses[key].sort(key=lambda x: x.get("ayah", 0))
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Build chunks
 # ─────────────────────────────────────────────────────────────────────────────
 
-print(f"\n--- Building chunks (context window ±{CONTEXT_WINDOW}) ---")
+print(f"\n--- Chunking corpus ({CHUNK_SIZE} words, {CHUNK_OVERLAP} overlap) ---")
 all_chunks: list[dict] = []
 
-for item in tqdm(corpus, desc="Building chunks"):
+for item in tqdm(corpus, desc="Chunking"):
     raw_text = item.get("text", "").strip()
     section  = item.get("section",  "Unknown")
     category = item.get("category", "Unknown")
@@ -576,21 +401,34 @@ for item in tqdm(corpus, desc="Building chunks"):
     if not raw_text:
         continue
 
-    # ── Hadith ────────────────────────────────────────────────────────────────
-    if category == "Hadith":
-        parts = [
-            f"Source: {section}. Religion: Islam. Language: {language}. "
-            f"Hadith {ayah}.",
-            f"Hadith: {raw_text}",
-        ]
-        # Synonym expansion only meaningful for English hadith
+    for chunk in chunk_text(raw_text):
+        parts = []
+
         if language == "en":
-            synonyms = _get_synonym_expansion(raw_text)
+            # English: topic preamble + source header + chunk + synonym expansion
+            preamble = _get_topic_preamble(section)
+            if preamble:
+                parts.append(preamble)
+            parts.append(
+                f"Surah: {section}. Category: {category}. Religion: Islam."
+            )
+            parts.append(chunk)
+            synonyms = _get_synonym_expansion(chunk)
             if synonyms:
                 parts.append(synonyms)
 
+        else:
+            # Sinhala / Tamil: plain header + chunk only.
+            # No English preambles — keeps native chunks clean so they
+            # match native-script queries in FAISS.
+            lang_label = {"sin": "Sinhala", "tam": "Tamil"}.get(language, language)
+            parts.append(
+                f"Surah: {section}. Category: {category}. Language: {lang_label}."
+            )
+            parts.append(chunk)
+
         all_chunks.append({
-            "text":       raw_text,
+            "text":       chunk,
             "embed_text": " ".join(parts),
             "book":       section,
             "section":    section,
@@ -601,79 +439,16 @@ for item in tqdm(corpus, desc="Building chunks"):
             "language":   language,
             "source":     source,
         })
-        continue
-
-    # ── Quran verse ───────────────────────────────────────────────────────────
-    siblings = surah_verses.get((language, surah), [])
-    idx = next((i for i, v in enumerate(siblings)
-                if v.get("ayah") == ayah), None)
-
-    prev_texts: list[str] = []
-    next_texts: list[str] = []
-    if idx is not None:
-        for offset in range(1, CONTEXT_WINDOW + 1):
-            if idx - offset >= 0:
-                prev_texts.insert(0, siblings[idx - offset].get("text", "").strip())
-            if idx + offset < len(siblings):
-                next_texts.append(siblings[idx + offset].get("text", "").strip())
-
-    parts = []
-
-    if language == "en":
-        # English: full preamble + synonym expansion
-        preamble = _get_topic_preamble(section)
-        if preamble:
-            parts.append(preamble)
-        parts.append(
-            f"Surah: {section}. Revelation: {category}. Religion: Islam. "
-            f"Language: English. Quran {surah}:{ayah}."
-        )
-        if prev_texts:
-            parts.append("Context before: " + " ".join(prev_texts))
-        parts.append(f"Verse: {raw_text}")
-        if next_texts:
-            parts.append("Context after: " + " ".join(next_texts))
-        synonyms = _get_synonym_expansion(raw_text)
-        if synonyms:
-            parts.append(synonyms)
-
-    else:
-        # Sinhala / Tamil: structural header + context window in native script.
-        # No English preamble — the multilingual model handles the language
-        # natively; injecting English noise would hurt cross-lingual alignment.
-        lang_label = {"sin": "Sinhala", "tam": "Tamil"}.get(language, language)
-        parts.append(
-            f"Surah: {section}. Revelation: {category}. Religion: Islam. "
-            f"Language: {lang_label}. Quran {surah}:{ayah}."
-        )
-        if prev_texts:
-            parts.append(" ".join(prev_texts))
-        parts.append(raw_text)
-        if next_texts:
-            parts.append(" ".join(next_texts))
-
-    all_chunks.append({
-        "text":       raw_text,
-        "embed_text": " ".join(parts),
-        "book":       section,
-        "section":    section,
-        "category":   category,
-        "surah":      surah,
-        "ayah":       ayah,
-        "religion":   "Islam",
-        "language":   language,
-        "source":     source,
-    })
 
 print(f"Total chunks produced: {len(all_chunks):,}")
 
-# Summary by language
 by_lang: dict[str, int] = {}
 for c in all_chunks:
     by_lang[c["language"]] = by_lang.get(c["language"], 0) + 1
 print(f"\n  Chunks by language:")
 for lang, cnt in sorted(by_lang.items()):
-    print(f"    {lang:<6} {cnt:>8,}")
+    label = {"en": "English", "sin": "Sinhala", "tam": "Tamil"}.get(lang, lang)
+    print(f"    {label:<10} {cnt:>8,}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLite  — chunks-en-si-ta.db
@@ -731,20 +506,19 @@ con.executemany(
 )
 con.commit()
 
-# Row counts per language in DB
 print(f"  DB row counts per language:")
 for lang, cnt in sorted(by_lang.items()):
     row = con.execute(
         "SELECT COUNT(*) FROM chunks WHERE language=?", (lang,)
     ).fetchone()
-    print(f"    {lang:<6} {row[0]:>8,}")
+    label = {"en": "English", "sin": "Sinhala", "tam": "Tamil"}.get(lang, lang)
+    print(f"    {label:<10} {row[0]:>8,}")
 
 con.close()
 
 db_mb = CHUNKS_DB_PATH.stat().st_size / 1_048_576
 print(f"Saved {CHUNKS_DB_PATH.name}  ({db_mb:.1f} MB, {len(all_chunks):,} rows)")
 
-# Backup JSON (no embed_text)
 CHUNKS_PATH.write_text(
     json.dumps(
         [{k: v for k, v in c.items() if k != "embed_text"} for c in all_chunks],
@@ -755,11 +529,11 @@ CHUNKS_PATH.write_text(
 print(f"Saved {CHUNKS_PATH.name}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Embeddings  (multilingual model)
+# Embeddings + FAISS  — single model, single index (mirrors Christianity)
 # ─────────────────────────────────────────────────────────────────────────────
 
 print(f"\n--- Generating embeddings with '{MODEL_NAME}' ---")
-print(f"    (multilingual: EN + SIN + TAM in one shared vector space)")
+print(f"    Single model for all languages — matches query model in retrieve.py")
 model = SentenceTransformer(MODEL_NAME)
 
 embeddings: np.ndarray = model.encode(
@@ -772,10 +546,6 @@ embeddings: np.ndarray = model.encode(
 np.save(EMBEDDINGS_PATH, embeddings)
 print(f"Saved {EMBEDDINGS_PATH.name}  shape={embeddings.shape}")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FAISS index  — faiss_index-en-si-ta.bin
-# ─────────────────────────────────────────────────────────────────────────────
-
 print(f"\n--- Building FAISS index ---")
 faiss.normalize_L2(embeddings)
 index = faiss.IndexFlatIP(embeddings.shape[1])
@@ -784,7 +554,7 @@ faiss.write_index(index, str(FAISS_PATH))
 print(f"Saved {FAISS_PATH.name}  ({index.ntotal:,} vectors, dim={embeddings.shape[1]})")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Final summary
+# Summary
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("\n" + "=" * 60)
@@ -805,7 +575,7 @@ for path, note in [
     (CHUNKS_PATH,     "<-- local backup"),
 ]:
     mb = path.stat().st_size / 1_048_576
-    print(f"    {path.name:<40} {mb:>7.1f} MB   {note}")
+    print(f"    {path.name:<42} {mb:>7.1f} MB   {note}")
 
 print(f"\n  Chunks by category:")
 chunk_by_cat: dict[str, int] = {}
