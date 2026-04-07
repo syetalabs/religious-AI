@@ -77,8 +77,11 @@ TOPIC_PREAMBLES: list[tuple[str, str]] = [
     )),
     ("Al-Baqarah", (
         "Al-Baqarah. Longest surah. Quran guidance for believers. "
-        "Taqwa. Fear of Allah. Five pillars. Prayer salah. Fasting sawm. "
-        "Zakat. Hajj. Belief in Allah angels books prophets hereafter. "
+        "Taqwa. Fear of Allah. Five pillars of Islam. "
+        "Prayer salah five times a day. Fajr Dhuhr Asr Maghrib Isha. "
+        "Establish prayer. And establish regular prayer salah. "
+        "Fasting sawm. Zakat. Hajj. "
+        "Belief in Allah angels books prophets hereafter. "
         "Ayatul Kursi. Throne verse. Allah living sustaining. "
         "No compulsion in religion. 2:256. "
         "Riba interest prohibited. Marriage divorce. Inheritance. Qibla. "
@@ -96,7 +99,9 @@ TOPIC_PREAMBLES: list[tuple[str, str]] = [
         "An-Nisa. Women. Rights of women in Islam. Marriage. "
         "Inheritance law. Orphans protection. Justice. "
         "Prohibition of usury riba. Guardianship. Divorce. "
-        "Hypocrites. Jihad. Prayer shortened in travel."
+        "Hypocrites. Jihad. Prayer shortened in travel. "
+        "Verily prayer has been decreed upon the believers at fixed times. "
+        "Prayer is obligatory at fixed times. Five obligatory prayers."
     )),
     ("Al-Ma'idah", (
         "Al-Maidah. Table spread. Halal food permitted. Forbidden foods. "
@@ -257,11 +262,18 @@ SYNONYM_EXPANSIONS: list[tuple[list[str], str]] = [
      "Who is Allah. Nature of God in Islam. Tawhid oneness of Allah. "
      "Allah's names and attributes. 99 names of Allah. Asmaul Husna. Omnipotent."),
     (["prayer", "salah", "salat", "pray", "worship", "prostrate",
-      "ruku", "sujud", "wudu", "ablution", "qibla", "mosque", "masjid"],
-     "Salah prayer in Islam. Five daily prayers. Fajr Dhuhr Asr Maghrib Isha. "
-     "How to perform salah. How many times do Muslims pray per day. "
+      "ruku", "sujud", "wudu", "ablution", "qibla", "mosque", "masjid",
+      "times", "how many", "five times", "fajr", "dhuhr", "asr",
+      "maghrib", "isha", "obligatory", "establish prayer"],
+     "Salah prayer in Islam. Five daily prayers five times a day. "
+     "Fajr dawn prayer. Dhuhr midday prayer. Asr afternoon prayer. "
+     "Maghrib sunset prayer. Isha night prayer. "
+     "How many times do Muslims pray per day. Muslims pray five times daily. "
+     "Establish regular prayer salah. Second pillar of Islam. "
      "Prayer pillar of Islam. Wudu before prayer. "
-     "Friday prayer Jumuah. Night prayer tahajjud."),
+     "Friday prayer Jumuah. Night prayer tahajjud. "
+     "And establish prayer and give zakat. Quran commands prayer. "
+     "Verily prayer has been decreed upon the believers at fixed times."),
     (["fast", "fasting", "sawm", "ramadan", "iftar", "suhoor", "suhur"],
      "Fasting in Islam. Sawm Ramadan. Pillar of Islam. "
      "Why Muslims fast. Ramadan month of Quran. "
