@@ -248,8 +248,8 @@ religious-AI/
 | ✅ Done | Moderation layer (pre + post translation) |
 | ✅ Done | On-demand religion loading (`/prepare` + `/status`) |
 | ✅ Done | Native-language chunk retrieval for Sinhala/Tamil |
-| 🔄 In Progress | Hinduism — English, Sinhala, Tamil |
-| 📋 Planned | Islam — English, Sinhala, Tamil |
+| ✅ Done | Hinduism — English, Sinhala, Tamil |
+| 🔄 In Progress | Islam — English, Sinhala, Tamil |
 | 📋 Planned | Voice input/output (STT + TTS) |
 | 📋 Planned | Community Q&A archive |
 | 📋 Planned | Admin dashboard for religious leaders |
