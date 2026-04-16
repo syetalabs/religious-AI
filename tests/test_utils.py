@@ -1,5 +1,5 @@
 """
-test_utils_buddhism.py — Utilities for Buddhism-only Religious-AI test suite
+test_utils.py — Shared utilities for Religious-AI test suites
 """
 import os
 import json
@@ -19,10 +19,8 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 JUDGE_MODEL  = "llama-3.3-70b-versatile"
 
-RELIGION = "Buddhism"
-
-PASS_THRESHOLD   = 6
-TIMEOUT_SECONDS  = 60
+PASS_THRESHOLD  = 6
+TIMEOUT_SECONDS = 60
 
 # ANSI colours
 GREEN  = "\033[92m"
@@ -60,24 +58,24 @@ class TestResult:
 
 
 # ──────────────────────────────────────────────────────────────
-# API helpers (Buddhism only)
+# API helpers
 # ──────────────────────────────────────────────────────────────
-def ask(question: str, language: str = "en") -> dict:
+def ask(question: str, religion: str, language: str = "en") -> dict:
     resp = requests.post(
         f"{API_BASE}/ask",
-        json={"question": question, "religion": RELIGION, "language": language},
+        json={"question": question, "religion": religion, "language": language},
         timeout=TIMEOUT_SECONDS,
     )
     resp.raise_for_status()
     return resp.json()
 
 
-def wait_for_buddhism(timeout: int = 120) -> bool:
-    print(f"  [wait] Waiting for Buddhism to load", end="", flush=True)
+def wait_for_religion(religion: str, timeout: int = 120) -> bool:
+    print(f"  [wait] Waiting for {religion} to load", end="", flush=True)
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            r = requests.get(f"{API_BASE}/status/{RELIGION}", timeout=10)
+            r = requests.get(f"{API_BASE}/status/{religion}", timeout=10)
             if r.json().get("status") == "ready":
                 print(" ✓")
                 return True
@@ -90,13 +88,14 @@ def wait_for_buddhism(timeout: int = 120) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────
-# LLM Judge (unchanged)
+# LLM Judge
 # ──────────────────────────────────────────────────────────────
 _JUDGE_SYSTEM = """You are a strict quality evaluator for a scripture-based religious chatbot.
 Score the answer on a scale from 0 to 10.
 
 Return ONLY JSON:
 {"score": <0-10>, "reason": "<one sentence>"}"""
+
 
 def judge(question: str, answer: str, language: str) -> tuple[int, str]:
     if not GROQ_API_KEY:
@@ -106,7 +105,10 @@ def judge(question: str, answer: str, language: str) -> tuple[int, str]:
     try:
         resp = requests.post(
             GROQ_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
             json={
                 "model": JUDGE_MODEL,
                 "messages": [
@@ -128,13 +130,13 @@ def judge(question: str, answer: str, language: str) -> tuple[int, str]:
 
 
 # ──────────────────────────────────────────────────────────────
-# Runner (Buddhism only)
+# Runner
 # ──────────────────────────────────────────────────────────────
-def run_suite(cases: list[TestCase]) -> list[TestResult]:
+def run_suite(religion: str, cases: list[TestCase]) -> list[TestResult]:
     results: list[TestResult] = []
 
     print(f"\n{BOLD}{CYAN}{'═'*50}{RESET}")
-    print(f"{BOLD}{CYAN}  Testing Buddhism ({len(cases)} cases){RESET}")
+    print(f"{BOLD}{CYAN}  Testing {religion} ({len(cases)} cases){RESET}")
     print(f"{BOLD}{CYAN}{'═'*50}{RESET}\n")
 
     for i, case in enumerate(cases, 1):
@@ -142,9 +144,12 @@ def run_suite(cases: list[TestCase]) -> list[TestResult]:
 
         t0 = time.time()
         try:
-            data = ask(case.question, case.language)
+            data = ask(case.question, religion, case.language)
         except Exception as exc:
-            print(f"{RED}ERROR: {exc}{RESET}")
+            print(f"{RED}ERROR: {exc}{RESET}\n")
+            results.append(TestResult(
+                case=case, passed=False, score=0, error=str(exc)
+            ))
             continue
 
         elapsed = int((time.time() - t0) * 1000)
@@ -159,15 +164,18 @@ def run_suite(cases: list[TestCase]) -> list[TestResult]:
 
         results.append(TestResult(
             case=case, passed=passed, score=score,
-            answer=answer, judge_reason=reason, duration_ms=elapsed
+            answer=answer, judge_reason=reason, duration_ms=elapsed,
         ))
 
     return results
 
 
-def print_summary(results: list[TestResult]) -> None:
+def print_summary(religion: str, results: list[TestResult]) -> None:
     passed = sum(1 for r in results if r.passed)
     total  = len(results)
+    pct    = 100 * passed // total if total else 0
+    colour = GREEN if pct >= 75 else (YELLOW if pct >= 50 else RED)
 
     print(f"\n{BOLD}{'─'*50}{RESET}")
-    print(f"Buddhism Results: {passed}/{total} passed")
+    print(f"{religion} Results: {colour}{passed}/{total} passed ({pct}%){RESET}")
+    print(f"{BOLD}{'─'*50}{RESET}")

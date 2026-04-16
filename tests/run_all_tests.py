@@ -1,7 +1,7 @@
 """
-run_buddhism_tests.py — Run only the Buddhism Religious-AI test suite
+run_all_tests.py — Run Buddhism and Christianity Religious-AI test suites
 Usage:
-    python run_buddhism_tests.py
+    python run_all_tests.py
 
 Requires: GROQ_API_KEY in .env and a running backend at API_BASE (default localhost:8000)
 """
@@ -16,34 +16,38 @@ from test_utils import (
     wait_for_religion, run_suite, print_summary,
 )
 
-# Import only Buddhism cases
-from test_buddhism import CASES as BU_CASES
+from test_buddhism    import CASES as BU_CASES
+from test_christianity import CASES as CH_CASES
+
+SUITES = [
+    ("Buddhism",     BU_CASES),
+    ("Christianity", CH_CASES),
+]
 
 
 def main():
-    religion = "Buddhism"
-
     print(f"\n{BOLD}{CYAN}{'═'*60}{RESET}")
-    print(f"{BOLD}{CYAN}  Religious-AI  Buddhism Test Suite{RESET}")
+    print(f"{BOLD}{CYAN}  Religious-AI — All Test Suites{RESET}")
     print(f"{BOLD}{CYAN}{'═'*60}{RESET}\n")
 
-    start_time = time.time()
+    start_time  = time.time()
+    all_results = []
 
-    # Load Buddhism
-    if not wait_for_religion(religion):
-        print(f"{RED}  {religion} failed to load — exiting.{RESET}\n")
-        sys.exit(1)
+    for religion, cases in SUITES:
+        if not wait_for_religion(religion):
+            print(f"{RED}  {religion} failed to load — skipping.{RESET}\n")
+            continue
 
-    # Run tests
-    results = run_suite(religion, BU_CASES)
-    print_summary(religion, results)
+        results = run_suite(religion, cases)
+        print_summary(religion, results)
+        all_results.extend(results)
 
-    passed = sum(1 for r in results if r.passed)
-    total = len(results)
-
+    # ── Grand total ───────────────────────────────────────────
+    passed  = sum(1 for r in all_results if r.passed)
+    total   = len(all_results)
     elapsed = int(time.time() - start_time)
-    pct = 100 * passed // total if total else 0
-    colour = GREEN if pct >= 75 else (YELLOW if pct >= 50 else RED)
+    pct     = 100 * passed // total if total else 0
+    colour  = GREEN if pct >= 75 else (YELLOW if pct >= 50 else RED)
 
     print(f"\n{BOLD}{'═'*60}{RESET}")
     print(f"{BOLD}  TOTAL: {colour}{passed}/{total} passed ({pct}%){RESET}  [{elapsed}s]")
