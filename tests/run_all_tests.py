@@ -1,5 +1,5 @@
 """
-run_all_tests.py — Run Buddhism and Christianity Religious-AI test suites
+run_all_tests.py — Run Buddhism, Christianity, and Hinduism Religious-AI test suites
 Usage:
     python run_all_tests.py
 
@@ -16,12 +16,14 @@ from test_utils import (
     wait_for_religion, run_suite, print_summary,
 )
 
-from test_buddhism    import CASES as BU_CASES
+from test_buddhism import CASES as BU_CASES
 from test_christianity import CASES as CH_CASES
+from test_hinduism import CASES as HI_CASES   
 
 SUITES = [
-    ("Buddhism",     BU_CASES),
+    ("Buddhism", BU_CASES),
     ("Christianity", CH_CASES),
+    ("Hinduism", HI_CASES),   
 ]
 
 
@@ -30,7 +32,7 @@ def main():
     print(f"{BOLD}{CYAN}  Religious-AI — All Test Suites{RESET}")
     print(f"{BOLD}{CYAN}{'═'*60}{RESET}\n")
 
-    start_time  = time.time()
+    start_time = time.time()
     all_results = []
 
     for religion, cases in SUITES:
