@@ -170,6 +170,24 @@ def run_suite(religion: str, cases: list[TestCase]) -> list[TestResult]:
     return results
 
 
+# ──────────────────────────────────────────────────────────────
+# Run multiple religion suites
+# ──────────────────────────────────────────────────────────────
+def run_all_suites(suites: dict[str, list[TestCase]]) -> dict[str, list[TestResult]]:
+    all_results = {}
+
+    for religion, cases in suites.items():
+        if not wait_for_religion(religion):
+            print(f"{RED}Skipping {religion} (not ready){RESET}")
+            continue
+
+        results = run_suite(religion, cases)
+        print_summary(religion, results)
+        all_results[religion] = results
+
+    return all_results
+
+
 def print_summary(religion: str, results: list[TestResult]) -> None:
     passed = sum(1 for r in results if r.passed)
     total  = len(results)
