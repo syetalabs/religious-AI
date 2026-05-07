@@ -1,4 +1,5 @@
 import os
+import time
 import threading
 import httpx
 from pathlib import Path
@@ -160,11 +161,24 @@ def ask_question(request: QuestionRequest):
     # _lazy_load evicts any currently-loaded religion before loading the new one
     _lazy_load(request.religion)
 
+    print(f"\n{'─'*60}")
+    print(f"[ASK] religion={request.religion} | lang={request.language}")
+    print(f"[ASK] question={request.question[:80]!r}")
+
+    t0 = time.time()
     result = answer_question(
         question=request.question,
         religion=request.religion,
         language=language,
     )
+    elapsed_ms = int((time.time() - t0) * 1000)
+
+    flagged  = result.get("flagged", False)
+    low_conf = result.get("low_confidence", False)
+    sources  = result.get("sources", [])
+    status   = "FLAGGED" if flagged else ("LOW-CONF" if low_conf else "OK")
+    print(f"[ASK] → {status} | {elapsed_ms}ms | sources={len(sources)}")
+    print(f"[ASK] answer={result['answer'][:100]!r}")
 
     return {
         "answer":             result["answer"],

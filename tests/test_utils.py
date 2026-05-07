@@ -15,7 +15,7 @@ load_dotenv()
 # ──────────────────────────────────────────────────────────────
 # Config
 # ──────────────────────────────────────────────────────────────
-API_BASE     = os.environ.get("API_BASE", "http://localhost:8000")
+API_BASE     = "http://127.0.0.1:8000"
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 JUDGE_MODEL  = "llama-3.3-70b-versatile"
@@ -61,14 +61,29 @@ class TestResult:
 # ──────────────────────────────────────────────────────────────
 # API helpers
 # ──────────────────────────────────────────────────────────────
-def ask(question: str, religion: str, language: str = "en") -> dict:
-    resp = requests.post(
-        f"{API_BASE}/ask",
-        json={"question": question, "religion": religion, "language": language},
-        timeout=TIMEOUT_SECONDS,
-    )
-    resp.raise_for_status()
-    return resp.json()
+def ask(question: str, religion: str, language: str = "en", retries: int = 3) -> dict:
+    """Call /ask with automatic retry on Groq rate-limit responses."""
+    import re as _re
+    data = {}
+    for attempt in range(1, retries + 1):
+        resp = requests.post(
+            f"{API_BASE}/ask",
+            json={"question": question, "religion": religion, "language": language},
+            timeout=TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        answer = data.get("answer", "")
+        if "service is currently busy" in answer.lower() or "please try again" in answer.lower():
+            match = _re.search(r"(\d+)\s*second", answer)
+            wait = int(match.group(1)) + 2 if match else 20
+            if attempt < retries:
+                print(f"\n        {YELLOW}[rate-limit] Groq busy — waiting {wait}s (retry {attempt}/{retries-1})...{RESET}")
+                time.sleep(wait)
+                continue
+        return data
+    return data
 
 
 def wait_for_religion(religion: str, timeout: int = 120) -> bool:
@@ -193,6 +208,7 @@ def run_suite(religion: str, cases: list[TestCase]) -> list[TestResult]:
         print(f"        {YELLOW}{reason}{RESET}")
         if not passed:
             print(f"        Answer: {answer[:120]}...")
+        print()
         print()
 
     return results
