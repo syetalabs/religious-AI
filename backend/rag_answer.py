@@ -269,6 +269,15 @@ _UNSAFE_PHRASES = [
     "hate", "kill", "destroy", "inferior religion", "false religion",
 ]
 
+# Physical harm / illegal activity patterns — always flagged regardless of religion
+_HARMFUL_PATTERNS = [
+    r"\b(make|build|create|craft|synthesize|manufacture)\b.{0,30}\b(bomb|explosive|weapon|poison|drug|meth|napalm|grenade|landmine|ied)\b",
+    r"\b(how to|how do i|how can i|steps to|instructions? (for|to))\b.{0,30}\b(kill|murder|hurt|harm|attack|shoot|stab|blow up|explode)\b",
+    r"\b(hack|crack|exploit|bypass|break into)\b.{0,30}\b(computer|system|network|account|password|server)\b",
+    r"\b(suicide|self.harm|self.hurt|cut myself|end my life|kill myself)\b",
+    r"\b(child|minor|underage).{0,20}\b(sex|sexual|porn|naked|nude|abuse|exploit)\b",
+]
+
 _COMPARATIVE_PATTERNS = [
     r"\b(buddhism|christianity|islam|hinduism)\b.{0,30}\b(better|worse|superior|inferior|correct|wrong|true|false)\b",
     r"\b(better|worse|superior|inferior|correct|wrong|true|false)\b.{0,30}\b(buddhism|christianity|islam|hinduism)\b",
@@ -381,6 +390,10 @@ _FALLBACK_MESSAGES = {
             "Questions about other religions or their scriptures cannot be answered here. "
             "Please ask about this religion's specific teachings."
         ),
+        "harmful_content": (
+            "This question asks about harmful or illegal activities and cannot be answered here. "
+            "Please ask about spiritual teachings or scripture."
+        ),
         "no_context": "I do not have enough reliable scriptural context to answer this accurately.",
     },
     "si": {
@@ -401,6 +414,10 @@ _FALLBACK_MESSAGES = {
             "වෙනත් ආගම් ගැන ප්‍රශ්න මෙහිදී පිළිතුරු දිය නොහැක. "
             "කරුණාකර මෙම ආගමේ ඉගැන්වීම් ගැන නිශ්චිතව අසන්න."
         ),
+        "harmful_content": (
+            "මෙම ප්‍රශ්නය හානිකර හෝ නීතිවිරෝධී ක්‍රියාකාරකම් ගැන විමසයි. "
+            "කරුණාකර ආගමික ඉගැන්වීම් හෝ ශාස්ත්‍ර ගැන අසන්න."
+        ),
         "no_context": "මෙය නිවැරදිව පිළිතුරු දීමට ප්‍රමාණවත් විශ්වාසදායක ශාස්ත්‍රීය සන්දර්භයක් මා සතු නොවේ.",
     },
     "ta": {
@@ -420,6 +437,10 @@ _FALLBACK_MESSAGES = {
             "இந்த வழிகாட்டி தேர்ந்தெடுக்கப்பட்ட மதத்தின் மறைநூல் மற்றும் போதனைகளில் மட்டுமே கவனம் செலுத்துகிறது. "
             "மற்ற மதங்களைப் பற்றிய கேள்விகளுக்கு இங்கே பதிலளிக்க முடியாது. "
             "இந்த மதத்தின் குறிப்பிட்ட போதனைகளைப் பற்றி கேட்கவும்."
+        ),
+        "harmful_content": (
+            "இந்தக் கேள்வி தீங்கு விளைவிக்கும் அல்லது சட்டவிரோத செயல்களைப் பற்றி கேட்கிறது. "
+            "ஆன்மிக போதனைகள் அல்லது மறைநூல் பற்றி கேட்கவும்."
         ),
         "no_context": "இதை சரியாக பதிலளிக்க போதுமான நம்பகமான மறைநூல் சூழல் என்னிடம் இல்லை.",
     },
@@ -625,6 +646,12 @@ def _scrub_islam_inline_cites(text: str) -> str:
 
 def moderate_input(query: str, religion: str = "Buddhism") -> tuple[bool, str]:
     q = query.lower().strip()
+
+    # 0. Physical harm / illegal content — highest priority, always flagged
+    for pattern in _HARMFUL_PATTERNS:
+        if re.search(pattern, q, re.IGNORECASE):
+            print(f"  [moderate] Harmful pattern matched: {pattern[:60]!r}")
+            return False, "harmful_content"
 
     # 1. Unsafe / hate phrases
     for phrase in _UNSAFE_PHRASES:

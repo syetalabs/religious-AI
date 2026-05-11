@@ -6,6 +6,7 @@ import os
 import json
 import time
 import requests
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ load_dotenv()
 # ──────────────────────────────────────────────────────────────
 # Config
 # ──────────────────────────────────────────────────────────────
-API_BASE     = "http://127.0.0.1:8000"
+API_BASE     = os.environ.get("API_BASE", "http://localhost:8000")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 JUDGE_MODEL  = "llama-3.3-70b-versatile"
@@ -63,7 +64,6 @@ class TestResult:
 # ──────────────────────────────────────────────────────────────
 def ask(question: str, religion: str, language: str = "en", retries: int = 3) -> dict:
     """Call /ask with automatic retry on Groq rate-limit responses."""
-    import re as _re
     data = {}
     for attempt in range(1, retries + 1):
         resp = requests.post(
@@ -76,8 +76,8 @@ def ask(question: str, religion: str, language: str = "en", retries: int = 3) ->
 
         answer = data.get("answer", "")
         if "service is currently busy" in answer.lower() or "please try again" in answer.lower():
-            match = _re.search(r"(\d+)\s*second", answer)
-            wait = int(match.group(1)) + 2 if match else 20
+            m = re.search(r"(\d+)\s*second", answer)
+            wait = int(m.group(1)) + 2 if m else 20
             if attempt < retries:
                 print(f"\n        {YELLOW}[rate-limit] Groq busy — waiting {wait}s (retry {attempt}/{retries-1})...{RESET}")
                 time.sleep(wait)
@@ -145,9 +145,17 @@ def judge(question: str, answer: str, language: str) -> tuple[int, str]:
         )
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"].strip()
-        # Strip any markdown code fences just in case
+        # Strip markdown code fences
         raw = raw.strip("`").replace("json", "", 1).strip()
-        data = json.loads(raw)
+        # Extract only the JSON object — ignore any surrounding Unicode text
+        # that would cause json.loads to fail on Sinhala/Tamil characters
+        m = re.search(r'\{[^{}]*"score"\s*:\s*\d+[^{}]*\}', raw, re.DOTALL)
+        if m:
+            raw = m.group(0)
+        # Encode to ASCII, replacing non-ASCII chars in the reason with '?'
+        # so json.loads never sees raw Unicode that breaks the parser
+        raw_ascii = raw.encode("ascii", errors="replace").decode("ascii")
+        data = json.loads(raw_ascii)
         return int(data["score"]), str(data.get("reason", ""))
     except Exception as exc:
         return 5, f"Judge error: {exc}"
@@ -210,6 +218,7 @@ def run_suite(religion: str, cases: list[TestCase]) -> list[TestResult]:
             print(f"        Answer: {answer[:120]}...")
         print()
         print()
+        time.sleep(2)   # brief pause between cases to reduce Groq TPM rate-limit hits
 
     return results
 

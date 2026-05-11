@@ -71,6 +71,10 @@ def main():
         all_results[religion] = (passed, len(results))
 
     # ── Grand summary ──────────────────────────────────────────
+    if grand_total == 0:
+        print(f"\n{RED}No tests were run — is the backend running at {API_BASE}?{RESET}")
+        sys.exit(1)
+
     elapsed = int(time.time() - start_time)
     pct     = 100 * grand_passed // grand_total if grand_total else 0
     colour  = GREEN if pct >= 75 else (YELLOW if pct >= 50 else RED)
